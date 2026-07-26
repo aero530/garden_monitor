@@ -180,6 +180,21 @@ impl Store {
         rows.iter().map(planting_from_row).collect()
     }
 
+    /// Every planting the garden has ever held, live and removed, oldest first.
+    ///
+    /// Distinct from [`Store::planting_history`], which returns only what has been
+    /// pulled. Replay needs both: on any given past day some of these were growing and
+    /// some had not been planted yet, and the caller filters by date.
+    pub async fn all_plantings(&self, garden: GardenId) -> Result<Vec<Planting>> {
+        let rows = sqlx::query(
+            "SELECT * FROM plantings WHERE garden_id = ?1 ORDER BY planted_at, id",
+        )
+        .bind(garden.to_string())
+        .fetch_all(&self.db)
+        .await?;
+        rows.iter().map(planting_from_row).collect()
+    }
+
     pub async fn find_planting(
         &self,
         garden: GardenId,

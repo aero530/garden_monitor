@@ -81,6 +81,30 @@ impl Store {
         row.as_ref().map(snapshot_from_row).transpose()
     }
 
+    /// Readings inside a window, oldest first.
+    ///
+    /// Distinct from [`Store::readings_since`], which is open-ended and means "up to
+    /// now". Replay needs a closed window: a reading taken after the moment being
+    /// reconstructed had not happened yet, and letting one through is how a replay
+    /// quietly starts predicting the future.
+    pub async fn readings_between(
+        &self,
+        garden: GardenId,
+        from: Timestamp,
+        to: Timestamp,
+    ) -> Result<Vec<SensorSnapshot>> {
+        let rows = sqlx::query(
+            "SELECT * FROM readings WHERE garden_id = ?1 AND at >= ?2 AND at <= ?3
+             ORDER BY at ASC",
+        )
+        .bind(garden.to_string())
+        .bind(ts::encode(from))
+        .bind(ts::encode(to))
+        .fetch_all(&self.db)
+        .await?;
+        rows.iter().map(snapshot_from_row).collect()
+    }
+
     /// Readings since a point in time, oldest first. For charts and for fitting
     /// consumption rate.
     pub async fn readings_since(

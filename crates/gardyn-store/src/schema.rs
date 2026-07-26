@@ -1,8 +1,11 @@
 //! Database schema.
 //!
-//! Applied on startup. Timestamps are RFC 3339 text because that sorts correctly as a
-//! string, survives a `sqlite3` shell session unmangled, and round-trips through
-//! `jiff::Timestamp` without a conversion layer. Ids are UUID text for the same
+//! Applied on startup. Timestamps are RFC 3339 text: readable in a `sqlite3` shell,
+//! round-trips through `jiff::Timestamp` without a conversion layer, and sortable as
+//! text — but **only at fixed precision**. `jiff` prints the fewest fractional digits
+//! it can, and mixed widths make `"…:20Z"` sort after `"…:20.5Z"`, which quietly drops
+//! rows out of time windows. Everything is written with nine digits; see
+//! `ts::PRECISION` and `NORMALISE_TIMESTAMPS` below. Ids are UUID text for the same
 //! reason plus one more: they appear in URLs, and sequential ids under a sharing
 //! model invite enumeration.
 
@@ -315,4 +318,219 @@ CREATE TABLE IF NOT EXISTS components (
     created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS components_garden ON components(garden_id);
+"#;
+
+/// One-time normalisation of timestamps written before the precision was fixed.
+///
+/// `jiff` prints the fewest fractional digits it can, so early rows carry 0, 1, 3, 6
+/// or 9 of them. SQLite compares those as text, which puts `"…:20Z"` *after*
+/// `"…:20.5Z"` — so a row could sit inside a time window and be excluded from it. See
+/// `ts::PRECISION`.
+///
+/// Idempotent: rows already 30 characters long are skipped, so this costs one indexed
+/// scan per column on every start and does nothing after the first.
+pub const NORMALISE_TIMESTAMPS: &str = r#"
+UPDATE users SET created_at = substr(created_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(created_at, '.') > 0
+         THEN substr(created_at, instr(created_at, '.') + 1, length(created_at) - instr(created_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE created_at IS NOT NULL AND length(created_at) <> 30 AND created_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE users SET disabled_at = substr(disabled_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(disabled_at, '.') > 0
+         THEN substr(disabled_at, instr(disabled_at, '.') + 1, length(disabled_at) - instr(disabled_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE disabled_at IS NOT NULL AND length(disabled_at) <> 30 AND disabled_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE sessions SET created_at = substr(created_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(created_at, '.') > 0
+         THEN substr(created_at, instr(created_at, '.') + 1, length(created_at) - instr(created_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE created_at IS NOT NULL AND length(created_at) <> 30 AND created_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE sessions SET expires_at = substr(expires_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(expires_at, '.') > 0
+         THEN substr(expires_at, instr(expires_at, '.') + 1, length(expires_at) - instr(expires_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE expires_at IS NOT NULL AND length(expires_at) <> 30 AND expires_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE sessions SET last_seen_at = substr(last_seen_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(last_seen_at, '.') > 0
+         THEN substr(last_seen_at, instr(last_seen_at, '.') + 1, length(last_seen_at) - instr(last_seen_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE last_seen_at IS NOT NULL AND length(last_seen_at) <> 30 AND last_seen_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE gardens SET created_at = substr(created_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(created_at, '.') > 0
+         THEN substr(created_at, instr(created_at, '.') + 1, length(created_at) - instr(created_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE created_at IS NOT NULL AND length(created_at) <> 30 AND created_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE memberships SET granted_at = substr(granted_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(granted_at, '.') > 0
+         THEN substr(granted_at, instr(granted_at, '.') + 1, length(granted_at) - instr(granted_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE granted_at IS NOT NULL AND length(granted_at) <> 30 AND granted_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE invitations SET created_at = substr(created_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(created_at, '.') > 0
+         THEN substr(created_at, instr(created_at, '.') + 1, length(created_at) - instr(created_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE created_at IS NOT NULL AND length(created_at) <> 30 AND created_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE invitations SET expires_at = substr(expires_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(expires_at, '.') > 0
+         THEN substr(expires_at, instr(expires_at, '.') + 1, length(expires_at) - instr(expires_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE expires_at IS NOT NULL AND length(expires_at) <> 30 AND expires_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE invitations SET accepted_at = substr(accepted_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(accepted_at, '.') > 0
+         THEN substr(accepted_at, instr(accepted_at, '.') + 1, length(accepted_at) - instr(accepted_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE accepted_at IS NOT NULL AND length(accepted_at) <> 30 AND accepted_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE invitations SET revoked_at = substr(revoked_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(revoked_at, '.') > 0
+         THEN substr(revoked_at, instr(revoked_at, '.') + 1, length(revoked_at) - instr(revoked_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE revoked_at IS NOT NULL AND length(revoked_at) <> 30 AND revoked_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE plantings SET planted_at = substr(planted_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(planted_at, '.') > 0
+         THEN substr(planted_at, instr(planted_at, '.') + 1, length(planted_at) - instr(planted_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE planted_at IS NOT NULL AND length(planted_at) <> 30 AND planted_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE plantings SET germinated_at = substr(germinated_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(germinated_at, '.') > 0
+         THEN substr(germinated_at, instr(germinated_at, '.') + 1, length(germinated_at) - instr(germinated_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE germinated_at IS NOT NULL AND length(germinated_at) <> 30 AND germinated_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE plantings SET thinned_at = substr(thinned_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(thinned_at, '.') > 0
+         THEN substr(thinned_at, instr(thinned_at, '.') + 1, length(thinned_at) - instr(thinned_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE thinned_at IS NOT NULL AND length(thinned_at) <> 30 AND thinned_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE plantings SET removed_at = substr(removed_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(removed_at, '.') > 0
+         THEN substr(removed_at, instr(removed_at, '.') + 1, length(removed_at) - instr(removed_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE removed_at IS NOT NULL AND length(removed_at) <> 30 AND removed_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE tasks SET first_seen_at = substr(first_seen_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(first_seen_at, '.') > 0
+         THEN substr(first_seen_at, instr(first_seen_at, '.') + 1, length(first_seen_at) - instr(first_seen_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE first_seen_at IS NOT NULL AND length(first_seen_at) <> 30 AND first_seen_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE tasks SET due_at = substr(due_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(due_at, '.') > 0
+         THEN substr(due_at, instr(due_at, '.') + 1, length(due_at) - instr(due_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE due_at IS NOT NULL AND length(due_at) <> 30 AND due_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE tasks SET snoozed_until = substr(snoozed_until, 1, 19) || '.' || substr(
+    CASE WHEN instr(snoozed_until, '.') > 0
+         THEN substr(snoozed_until, instr(snoozed_until, '.') + 1, length(snoozed_until) - instr(snoozed_until, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE snoozed_until IS NOT NULL AND length(snoozed_until) <> 30 AND snoozed_until LIKE '____-__-__T__:__:__%Z';
+
+UPDATE tasks SET completed_at = substr(completed_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(completed_at, '.') > 0
+         THEN substr(completed_at, instr(completed_at, '.') + 1, length(completed_at) - instr(completed_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE completed_at IS NOT NULL AND length(completed_at) <> 30 AND completed_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE tasks SET notified_at = substr(notified_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(notified_at, '.') > 0
+         THEN substr(notified_at, instr(notified_at, '.') + 1, length(notified_at) - instr(notified_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE notified_at IS NOT NULL AND length(notified_at) <> 30 AND notified_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE events SET occurred_at = substr(occurred_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(occurred_at, '.') > 0
+         THEN substr(occurred_at, instr(occurred_at, '.') + 1, length(occurred_at) - instr(occurred_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE occurred_at IS NOT NULL AND length(occurred_at) <> 30 AND occurred_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE tank_events SET occurred_at = substr(occurred_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(occurred_at, '.') > 0
+         THEN substr(occurred_at, instr(occurred_at, '.') + 1, length(occurred_at) - instr(occurred_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE occurred_at IS NOT NULL AND length(occurred_at) <> 30 AND occurred_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE action_grants SET created_at = substr(created_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(created_at, '.') > 0
+         THEN substr(created_at, instr(created_at, '.') + 1, length(created_at) - instr(created_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE created_at IS NOT NULL AND length(created_at) <> 30 AND created_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE action_grants SET expires_at = substr(expires_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(expires_at, '.') > 0
+         THEN substr(expires_at, instr(expires_at, '.') + 1, length(expires_at) - instr(expires_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE expires_at IS NOT NULL AND length(expires_at) <> 30 AND expires_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE action_grants SET used_at = substr(used_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(used_at, '.') > 0
+         THEN substr(used_at, instr(used_at, '.') + 1, length(used_at) - instr(used_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE used_at IS NOT NULL AND length(used_at) <> 30 AND used_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE notifications SET sent_at = substr(sent_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(sent_at, '.') > 0
+         THEN substr(sent_at, instr(sent_at, '.') + 1, length(sent_at) - instr(sent_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE sent_at IS NOT NULL AND length(sent_at) <> 30 AND sent_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE readings SET at = substr(at, 1, 19) || '.' || substr(
+    CASE WHEN instr(at, '.') > 0
+         THEN substr(at, instr(at, '.') + 1, length(at) - instr(at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE at IS NOT NULL AND length(at) <> 30 AND at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE vision_config SET updated_at = substr(updated_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(updated_at, '.') > 0
+         THEN substr(updated_at, instr(updated_at, '.') + 1, length(updated_at) - instr(updated_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE updated_at IS NOT NULL AND length(updated_at) <> 30 AND updated_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE slot_metrics SET at = substr(at, 1, 19) || '.' || substr(
+    CASE WHEN instr(at, '.') > 0
+         THEN substr(at, instr(at, '.') + 1, length(at) - instr(at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE at IS NOT NULL AND length(at) <> 30 AND at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE algae_readings SET at = substr(at, 1, 19) || '.' || substr(
+    CASE WHEN instr(at, '.') > 0
+         THEN substr(at, instr(at, '.') + 1, length(at) - instr(at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE at IS NOT NULL AND length(at) <> 30 AND at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE frames SET captured_at = substr(captured_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(captured_at, '.') > 0
+         THEN substr(captured_at, instr(captured_at, '.') + 1, length(captured_at) - instr(captured_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE captured_at IS NOT NULL AND length(captured_at) <> 30 AND captured_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE frames SET created_at = substr(created_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(created_at, '.') > 0
+         THEN substr(created_at, instr(created_at, '.') + 1, length(created_at) - instr(created_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE created_at IS NOT NULL AND length(created_at) <> 30 AND created_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE components SET last_seen_at = substr(last_seen_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(last_seen_at, '.') > 0
+         THEN substr(last_seen_at, instr(last_seen_at, '.') + 1, length(last_seen_at) - instr(last_seen_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE last_seen_at IS NOT NULL AND length(last_seen_at) <> 30 AND last_seen_at LIKE '____-__-__T__:__:__%Z';
+
+UPDATE components SET created_at = substr(created_at, 1, 19) || '.' || substr(
+    CASE WHEN instr(created_at, '.') > 0
+         THEN substr(created_at, instr(created_at, '.') + 1, length(created_at) - instr(created_at, '.') - 1)
+         ELSE '' END || '000000000', 1, 9) || 'Z'
+WHERE created_at IS NOT NULL AND length(created_at) <> 30 AND created_at LIKE '____-__-__T__:__:__%Z';
 "#;

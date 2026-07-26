@@ -660,6 +660,7 @@ name = "gardyn-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "gardyn-auth",
  "gardyn-core",
  "gardyn-rules",
  "gardyn-store",
@@ -668,6 +669,7 @@ dependencies = [
  "jiff",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "uuid",
 ]

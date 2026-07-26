@@ -269,6 +269,7 @@ mod tests {
         for slot in &mut map.slots {
             slot.cm2_per_px = 0.05;
         }
+        map.scale_measured = true;
         map
     }
 

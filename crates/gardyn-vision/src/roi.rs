@@ -65,6 +65,15 @@ pub struct RoiMap {
     /// Where to look for algae. Usually the tank lid or the reservoir surface.
     #[serde(default)]
     pub tank: Option<Roi>,
+    /// Whether `cm2_per_px` was measured, or is still the grid's placeholder.
+    ///
+    /// An explicit flag rather than "is the scale different from the default", which
+    /// is what this was first: a perfectly ordinary calibration — a 7 cm yPod over 70
+    /// pixels — lands on exactly the placeholder value, and the map then reported
+    /// itself uncalibrated forever. A sentinel that a real measurement can collide
+    /// with is not a sentinel.
+    #[serde(default)]
+    pub scale_measured: bool,
 }
 
 /// A bare rectangle, for regions that are not a slot.
@@ -146,6 +155,7 @@ impl RoiMap {
             lens: LensCalibration::IDENTITY,
             slots,
             tank: None,
+            scale_measured: false,
         }
     }
 
@@ -155,9 +165,7 @@ impl RoiMap {
     /// is enough for growth rate and for stall detection — but their absolute value is
     /// meaningless, so the harvest threshold must not trust them.
     pub fn is_calibrated(&self) -> bool {
-        self.slots
-            .iter()
-            .any(|s| (s.cm2_per_px - DEFAULT_CM2_PER_PX).abs() > f32::EPSILON)
+        self.scale_measured
     }
 
     pub fn get(&self, slot: SlotId) -> Option<&SlotRoi> {
@@ -264,7 +272,20 @@ mod tests {
     fn a_fresh_grid_knows_it_has_no_real_scale() {
         let mut map = RoiMap::grid(&Geometry::STUDIO_2, 1920, 1080, 0.1);
         assert!(!map.is_calibrated());
-        map.slots[0].cm2_per_px = 0.031;
+        map.scale_measured = true;
+        assert!(map.is_calibrated());
+    }
+
+    #[test]
+    fn a_measurement_that_lands_on_the_placeholder_value_still_counts() {
+        // 7 cm over 70 px is 0.01 cm² per pixel, which is exactly the grid's
+        // placeholder. Inferring "calibrated" from the value would call this map
+        // uncalibrated and quietly refuse to report real areas.
+        let mut map = RoiMap::grid(&Geometry::STUDIO_2, 1920, 1080, 0.1);
+        for slot in &mut map.slots {
+            slot.cm2_per_px = DEFAULT_CM2_PER_PX;
+        }
+        map.scale_measured = true;
         assert!(map.is_calibrated());
     }
 
