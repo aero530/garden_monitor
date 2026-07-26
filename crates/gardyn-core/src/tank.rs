@@ -1,5 +1,6 @@
 //! Reservoir state: volume, consumption, and the nutrient mass balance.
 
+use crate::task::TaskKind;
 use crate::time::{add_days, days_since_or_never};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -228,6 +229,76 @@ impl TankState {
     /// Nutrient taken up by the plants, removing mass from solution.
     pub fn consume_nutrient(&mut self, units: f32) {
         self.nutrient_units = (self.nutrient_units - units).max(0.0);
+    }
+}
+
+/// Something the operator did to the tank.
+///
+/// The rule engine is stateless: it re-derives "you are overdue for a tank refresh"
+/// from `last_refresh` every time it runs. So an action that is not recorded did not
+/// happen, and the task comes back on the next tick looking exactly as it did before.
+///
+/// This is the tank's counterpart to a planting event, and it exists for the same
+/// reason: completion has to write back to the thing the rule reads, or marking a task
+/// done silently undoes itself.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TankEvent {
+    /// Water added. Dilutes the solution, since nutrient mass is unchanged.
+    TopOff { litres: f32 },
+    /// Emptied and refilled. Resets the nutrient balance entirely.
+    Refresh { fill_to_l: f32 },
+    /// Plant food added, in normalised dose-units. Adds to what is already there.
+    FoodDose { units: f32 },
+    /// Solution brought *to* a strength, rather than having a dose added to it.
+    ///
+    /// This is what completing a "feed the tank" task means, and it is deliberately
+    /// not `FoodDose`. Adding a full dose to a tank that is already half-strength
+    /// compounds, which is exactly the mistake open-loop dosing makes in practice.
+    FedToStrength { strength: f32 },
+    /// Water conditioner, HydroBoost or equivalent.
+    Conditioner,
+    /// Full strip-down and scrub.
+    DeepClean,
+}
+
+impl TankEvent {
+    pub fn apply(self, tank: &mut TankState, geometry: &TankGeometry, at: Timestamp) {
+        match self {
+            TankEvent::TopOff { litres } => tank.top_off(litres, geometry, at),
+            TankEvent::Refresh { fill_to_l } => tank.refresh(fill_to_l, geometry, at),
+            TankEvent::FoodDose { units } => tank.add_food(units, at),
+            TankEvent::FedToStrength { strength } => tank.set_strength(strength, at),
+            TankEvent::Conditioner => tank.add_conditioner(at),
+            TankEvent::DeepClean => tank.deep_clean(at),
+        }
+    }
+
+    /// Which event completing a task of this kind represents, if any.
+    ///
+    /// `AddWater` deliberately maps to nothing. How much went in is not knowable from
+    /// a button press, and the level sensor measures it directly — inventing a litre
+    /// count here would corrupt the mass balance the dosing rule depends on.
+    pub fn for_task(kind: TaskKind, geometry: &TankGeometry) -> Option<Self> {
+        match kind {
+            TaskKind::AddPlantFood => Some(TankEvent::FedToStrength { strength: 1.0 }),
+            TaskKind::AddConditioner => Some(TankEvent::Conditioner),
+            TaskKind::TankRefresh => Some(TankEvent::Refresh {
+                fill_to_l: geometry.capacity_l,
+            }),
+            TaskKind::DeepClean => Some(TankEvent::DeepClean),
+            _ => None,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            TankEvent::TopOff { .. } => "topped off",
+            TankEvent::Refresh { .. } => "refreshed",
+            TankEvent::FoodDose { .. } | TankEvent::FedToStrength { .. } => "fed",
+            TankEvent::Conditioner => "conditioned",
+            TankEvent::DeepClean => "deep cleaned",
+        }
     }
 }
 

@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/gardyn-auth",
+    "crates/gardyn-cli",
     "crates/gardyn-core",
     "crates/gardyn-edge",
     "crates/gardyn-guard",
@@ -11,6 +12,7 @@ members = [
     "crates/gardyn-rules",
     "crates/gardyn-sim",
     "crates/gardyn-store",
+    "crates/gardyn-vision",
     "crates/gardyn-web",
 ]
 
@@ -29,6 +31,7 @@ gardyn-proto = { path = "crates/gardyn-proto" }
 gardyn-rules = { path = "crates/gardyn-rules" }
 gardyn-sim = { path = "crates/gardyn-sim" }
 gardyn-store = { path = "crates/gardyn-store" }
+gardyn-vision = { path = "crates/gardyn-vision" }
 tokio = { version = "1", features = ["full"] }
 
 jiff = { version = "0.2", features = ["serde"] }
@@ -36,6 +39,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 uuid = { version = "1.24", features = ["v4", "serde"] }
+# JPEG for camera frames, PNG for the simulator and calibration overlays.
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

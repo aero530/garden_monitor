@@ -13,7 +13,9 @@ pub mod notifications;
 pub mod plantings;
 pub mod readings;
 pub mod schema;
+pub mod tank;
 pub mod tasks;
+pub mod vision;
 
 use frames::FrameStore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};

@@ -13,6 +13,7 @@ mod pages;
 mod render;
 mod state;
 mod ui;
+mod vision;
 
 use app::{AppState, Config};
 use axum::Router;

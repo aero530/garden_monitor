@@ -247,10 +247,22 @@ async fn upload_frame(
         .await?;
 
     match stored {
-        Ok(frame) => Ok(Json(FrameResponse {
-            id: frame.id.to_string(),
-            url: format!("{}{}", state.config.base_url, frame.image_path()),
-        })),
+        Ok(frame) => {
+            // Measured here, while the bytes are in memory. A failure inside this call
+            // is logged and swallowed: the photograph is worth keeping even when the
+            // pipeline cannot read it, and an agent that gets a 500 for an unanalysable
+            // frame will retry it forever.
+            if let Some(measured) =
+                crate::vision::analyse_and_store(&state.store, garden, frame.id, &body, captured_at)
+                    .await
+            {
+                tracing::debug!(%garden, measured, "frame analysed");
+            }
+            Ok(Json(FrameResponse {
+                id: frame.id.to_string(),
+                url: format!("{}{}", state.config.base_url, frame.image_path()),
+            }))
+        }
         Err(rejected) => Err(AppError::bad_request(rejected.to_string())),
     }
 }

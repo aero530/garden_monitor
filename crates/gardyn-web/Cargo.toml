@@ -14,6 +14,7 @@ gardyn-proto.workspace = true
 gardyn-rules.workspace = true
 gardyn-sim.workspace = true
 gardyn-store.workspace = true
+gardyn-vision.workspace = true
 jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -25,7 +26,7 @@ maud = { version = "0.27", features = ["axum"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image.workspace = true
 
 [lints]
 workspace = true

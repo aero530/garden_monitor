@@ -27,7 +27,7 @@ pub use planting::{Planting, PlantingId, Stage};
 pub use sensors::{PumpBaseline, SensorSnapshot, ewma};
 pub use slot::{Geometry, LightZone, SlotId, SlotPosition};
 pub use state::GardenState;
-pub use tank::{DosingSpec, TankGeometry, TankState};
+pub use tank::{DosingSpec, TankEvent, TankGeometry, TankState};
 pub use task::{DueWindow, RuleId, Severity, Target, Task, TaskDetail, TaskKey, TaskKind};
 pub use variety::{Category, CanopyClass, HarvestStyle, TargetRange, Variety, VarietyBook, VarietyId};
 pub use vision::{AlgaeReading, LensCalibration, SlotMetrics};

@@ -135,6 +135,26 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_garden_time ON events(garden_id, occurred_at DESC);
 
+-- What was done to the reservoir, and when.
+--
+-- The rule engine is stateless: it re-derives "you are overdue for a refresh" from
+-- `last_refresh` on every tick. Without this table those timestamps are always empty
+-- on a real garden, so the maintenance rules fire immediately, stay fired, and ignore
+-- the fact that you did the job — the same failure that planting events already fix
+-- for the plants.
+--
+-- The payload is the JSON of `gardyn_core::TankEvent`, so adding a kind of event does
+-- not need a migration.
+CREATE TABLE IF NOT EXISTS tank_events (
+    id          TEXT PRIMARY KEY,
+    garden_id   TEXT NOT NULL REFERENCES gardens(id) ON DELETE CASCADE,
+    payload     TEXT NOT NULL,
+    actor_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    occurred_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tank_events_garden_time
+    ON tank_events(garden_id, occurred_at);
+
 -- One-tap notification links. Narrow by construction: one user, one task, one action,
 -- one use. See gardyn_auth::action.
 CREATE TABLE IF NOT EXISTS action_grants (
@@ -205,6 +225,51 @@ CREATE TABLE IF NOT EXISTS readings (
     PRIMARY KEY (garden_id, at)
 );
 CREATE INDEX IF NOT EXISTS readings_garden_time ON readings(garden_id, at DESC);
+
+-- Where each slot is in the camera frame, as a `gardyn_vision::RoiMap` document.
+--
+-- One row per garden, and its presence is what switches vision on. That is not a
+-- convenience: without knowing which pixels are slot 7 there is no way to measure
+-- slot 7, so "no calibration" and "no canopy metrics" are the same fact rather than
+-- two settings that can disagree. `gardyn-cli vision calibrate` writes it.
+CREATE TABLE IF NOT EXISTS vision_config (
+    garden_id  TEXT PRIMARY KEY REFERENCES gardens(id) ON DELETE CASCADE,
+    roi_map    TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Per-slot measurements extracted from a frame.
+--
+-- Keyed by frame rather than only by time so a re-analysis after a threshold change
+-- replaces its own rows instead of accumulating a second opinion beside the first.
+-- The frame reference cascades: deleting a photograph deletes what was measured from
+-- it, because a measurement whose evidence is gone cannot be checked.
+CREATE TABLE IF NOT EXISTS slot_metrics (
+    garden_id       TEXT NOT NULL REFERENCES gardens(id) ON DELETE CASCADE,
+    frame_id        TEXT NOT NULL REFERENCES frames(id) ON DELETE CASCADE,
+    slot            INTEGER NOT NULL,
+    at              TEXT NOT NULL,
+    canopy_area_cm2 REAL NOT NULL,
+    green_fraction  REAL NOT NULL,
+    yellowing_index REAL NOT NULL,
+    growth_rate     REAL NOT NULL,
+    plant_count     INTEGER,
+    flowering       INTEGER,
+    diagnosis       TEXT,
+    PRIMARY KEY (frame_id, slot)
+);
+CREATE INDEX IF NOT EXISTS slot_metrics_garden_time
+    ON slot_metrics(garden_id, slot, at DESC);
+
+-- Algae coverage, which is a property of the tank rather than of a slot.
+CREATE TABLE IF NOT EXISTS algae_readings (
+    garden_id TEXT NOT NULL REFERENCES gardens(id) ON DELETE CASCADE,
+    frame_id  TEXT NOT NULL REFERENCES frames(id) ON DELETE CASCADE,
+    at        TEXT NOT NULL,
+    coverage  REAL NOT NULL,
+    PRIMARY KEY (frame_id)
+);
+CREATE INDEX IF NOT EXISTS algae_garden_time ON algae_readings(garden_id, at DESC);
 
 -- Camera frames. The image bytes live on disk; this table is the index.
 --

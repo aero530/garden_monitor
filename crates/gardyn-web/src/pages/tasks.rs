@@ -52,6 +52,7 @@ async fn apply(
             // this would make completion look like it worked and then silently undo
             // itself.
             record_against_planting(state, garden, &task, now).await?;
+            record_against_tank(state, garden, &task, actor, now).await?;
 
             state
                 .store
@@ -109,6 +110,55 @@ async fn record_against_planting(
         .record_planting_event(garden, planting, event, now)
         .await?;
     Ok(())
+}
+
+/// Close the same loop for the tank.
+///
+/// Feed, condition, refresh and deep clean are garden-level: they have no planting to
+/// write back to, and until this existed they wrote back to nothing at all. The rule
+/// engine re-derives "overdue for a refresh" from `last_refresh` on every tick, so
+/// completing one of these without recording it marked the task done and then produced
+/// the identical task again five minutes later, forever.
+async fn record_against_tank(
+    state: &AppState,
+    garden: GardenId,
+    task: &gardyn_store::tasks::TaskRecord,
+    actor: &Actor,
+    now: jiff::Timestamp,
+) -> Result<(), AppError> {
+    let Some(kind) = parse_task_kind(&task.kind) else {
+        return Ok(());
+    };
+    let geometry = gardyn_core::TankGeometry::STUDIO_2;
+    let Some(event) = gardyn_core::TankEvent::for_task(kind, &geometry) else {
+        return Ok(());
+    };
+    state
+        .store
+        .record_tank_event(garden, event, Some(actor.id()), now)
+        .await?;
+    Ok(())
+}
+
+/// Recover a `TaskKind` from the label stored on the row.
+fn parse_task_kind(label: &str) -> Option<gardyn_core::TaskKind> {
+    use gardyn_core::TaskKind::*;
+    [
+        AddWater,
+        AddPlantFood,
+        AddConditioner,
+        PruneRoots,
+        PrunePlant,
+        Harvest,
+        Thin,
+        Pollinate,
+        TankRefresh,
+        DeepClean,
+        Replant,
+        Inspect,
+    ]
+    .into_iter()
+    .find(|k| k.label() == label)
 }
 
 /// Recover a planting id from the rendered target text ("planting 7").
