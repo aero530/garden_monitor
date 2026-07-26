@@ -1,0 +1,28 @@
+﻿[package]
+name = "gardyn-web"
+description = "Self-hosted web UI for monitoring and managing gardens, and the servers behind them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+gardyn-auth.workspace = true
+gardyn-core.workspace = true
+gardyn-rules.workspace = true
+gardyn-sim.workspace = true
+gardyn-store.workspace = true
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+axum = { version = "0.8", features = ["macros"] }
+maud = { version = "0.27", features = ["axum"] }
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints]
+workspace = true

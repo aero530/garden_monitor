@@ -1,15 +1,20 @@
-[package]
-name = "gardyn-core"
-description = "Domain model for the Gardyn Studio 2 management system. Pure types, no I/O."
+﻿[package]
+name = "gardyn-auth"
+description = "Users, roles, permissions, sessions, and garden sharing."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+gardyn-core.workspace = true
 jiff.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 uuid.workspace = true
+argon2 = "0.5"
+rand = "0.9"
+sha2 = "0.10"
 
 [lints]
 workspace = true

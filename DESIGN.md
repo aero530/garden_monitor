@@ -399,19 +399,37 @@ target is tier 1 and trivial. If it's ARMv6 (Pi Zero v1), use `cross` — on Fed
 
 ```
 crates/
-  gardyn-core/     domain types, zero I/O
+  gardyn-core/     domain types, zero I/O                      ✅ built
+  gardyn-hal/      sensor/actuator traits + simulated impls    ✅ built
+  gardyn-rules/    pure rule functions over GardenState        ✅ built
+  gardyn-sim/      physics model + season runner               ✅ built
+  gardyn-auth/     accounts, roles, sharing, sessions          ✅ built
+  gardyn-store/    SQLite persistence                          ✅ built
+  gardyn-web/      axum + maud application, fleet view         ✅ built
   gardyn-proto/    MQTT topics + payload schemas, shared edge↔brain
-  gardyn-hal/      sensor/actuator traits + real and simulated impls
   gardyn-edge/     Pi binary: sensors, PWM, camera, MQTT
   gardyn-guard/    failsafe supervisor, minimal deps
-  gardyn-rules/    pure rule functions over GardenState
   gardyn-vision/   frame → per-slot metrics
   gardyn-notify/   ntfy / SMTP / iCal adapters
-  gardyn-brain/    axum server, ingest, storage, scheduler
   gardyn-cli/      calibrate, log events, replay history
 data/varieties.json
 deploy/            systemd units, Quadlet files, install.sh
 ```
+
+### Multi-tenancy
+
+The system is multi-user from the storage layer up: one account holds many gardens,
+and any garden can be shared with other accounts at a role (viewer, caretaker,
+steward, owner). See `gardyn-auth` for the policy and `gardyn-store/tests/tenancy.rs`
+for the isolation guarantees exercised against a real database.
+
+Two decisions worth recording:
+
+- **`Actor` is the only authorization decision point.** Handlers never compare roles;
+  they call `Actor::require`. One place to audit beats a check per handler.
+- **Server administration and garden access are disjoint.** An admin sees fleet health
+  and account counts, never garden contents. This is why `require_admin` does not fall
+  through to `require`, and why the fleet page carries no per-garden data.
 
 **Key crates.** Edge: `tokio`, `rppal` (GPIO/PWM/I²C, hardware PWM on GPIO18),
 `ina219`, `am2320`, `nokhwa` (V4L2), `rumqttc`, `redb`.

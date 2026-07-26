@@ -1,10 +1,13 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/gardyn-auth",
     "crates/gardyn-core",
     "crates/gardyn-hal",
     "crates/gardyn-rules",
     "crates/gardyn-sim",
+    "crates/gardyn-store",
+    "crates/gardyn-web",
 ]
 
 [workspace.package]
@@ -14,14 +17,19 @@ rust-version = "1.92"
 license = "MIT"
 
 [workspace.dependencies]
+gardyn-auth = { path = "crates/gardyn-auth" }
 gardyn-core = { path = "crates/gardyn-core" }
 gardyn-hal = { path = "crates/gardyn-hal" }
 gardyn-rules = { path = "crates/gardyn-rules" }
+gardyn-sim = { path = "crates/gardyn-sim" }
+gardyn-store = { path = "crates/gardyn-store" }
+tokio = { version = "1", features = ["full"] }
 
 jiff = { version = "0.2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+uuid = { version = "1.24", features = ["v4", "serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

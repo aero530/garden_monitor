@@ -5,6 +5,7 @@
 //! rule to see what it *would* have said.
 
 use crate::capability::CapabilitySet;
+use crate::garden::GardenId;
 use crate::planting::Planting;
 use crate::sensors::{PumpBaseline, SensorSnapshot};
 use crate::slot::{Geometry, SlotId};
@@ -17,6 +18,11 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GardenState {
+    /// Which garden this snapshot describes.
+    ///
+    /// Every piece of state must be attributable to a specific garden once one
+    /// account can hold several and share them with others.
+    pub garden: GardenId,
     pub now: Timestamp,
     pub geometry: Geometry,
     pub tank_geometry: TankGeometry,
@@ -36,8 +42,14 @@ pub struct GardenState {
 impl GardenState {
     /// A bare Studio 2 with no plantings, stock sensors, and a full tank.
     pub fn new_studio_2(now: Timestamp) -> Self {
+        Self::for_garden(GardenId::new(), now)
+    }
+
+    /// A bare Studio 2 belonging to a known garden.
+    pub fn for_garden(garden: GardenId, now: Timestamp) -> Self {
         let tank_geometry = TankGeometry::STUDIO_2;
         Self {
+            garden,
             now,
             geometry: Geometry::STUDIO_2,
             tank_geometry,

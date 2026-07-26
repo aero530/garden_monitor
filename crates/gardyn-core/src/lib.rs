@@ -10,6 +10,7 @@
 //! runs it only when the garden currently provides it.
 
 pub mod capability;
+pub mod garden;
 pub mod planting;
 pub mod sensors;
 pub mod slot;
@@ -21,6 +22,7 @@ pub mod variety;
 pub mod vision;
 
 pub use capability::{Capability, CapabilitySet};
+pub use garden::{DeviceModel, Garden, GardenId};
 pub use planting::{Planting, PlantingId, Stage};
 pub use sensors::{PumpBaseline, SensorSnapshot, ewma};
 pub use slot::{Geometry, SlotId, SlotPosition};
