@@ -389,24 +389,40 @@ alternative.
 
 ## 11. Deployment — Fedora 44 on Proxmox
 
-**VM:** 2 vCPU / 4 GB RAM / 40 GB disk is ample.
+Step by step, with every command: **[DEPLOYMENT.md](DEPLOYMENT.md)**. The units
+themselves live in [`deploy/`](deploy/). This section is the shape of it.
 
-**Podman + Quadlet**, not Docker Compose — it's the Fedora-native path and gives real
-systemd units. Drop `.container` files in `/etc/containers/systemd/`.
+**VM:** 2 vCPU / 4 GB RAM / 40 GB disk is ample — 4 vCPU and 12 GB if Ollama is
+enabled. The disk is sized for camera frames, not for the database.
 
-Containers: `mosquitto` (broker), `ntfy` (self-hosted push), `gardyn-brain`, and
-`ollama` only if `VisualDiagnosis` is enabled. Grafana + VictoriaMetrics are a
-worthwhile later add for time-series exploration; the built-in dashboard covers the
-operational view.
+**Podman + Quadlet**, not Docker Compose. It is the Fedora-native path and gives real
+systemd units: a `.container` file in `/etc/containers/systemd/` becomes a `.service`
+at `daemon-reload`.
+
+**Two containers**, plus one optional:
+
+| | |
+|---|---|
+| `gardyn-web` | the brain — built locally from this repo |
+| `gardyn-ntfy` | self-hosted push |
+| `gardyn-ollama` | only if `VisualDiagnosis` is enabled |
+
+There is **no broker.** An earlier version of this section listed `mosquitto` on 1883;
+the transport is HTTP with a bearer token, and the container was removed along with the
+protocol. Grafana and VictoriaMetrics remain a worthwhile later addition for
+time-series exploration; the built-in dashboard covers the operational view.
 
 All of these are self-hosted by design — no third-party service sits in the runtime
 path. The phone's ntfy app is pointed at our server rather than `ntfy.sh`.
 
-- **SELinux** is enforcing — volume mounts need `:Z`. Bind unprivileged ports
-  (1883, 8080).
-- **firewalld** — 1883 restricted to the LAN, 8080 to Tailscale.
-- **SQLite in WAL mode.** A Proxmox snapshot of a live SQLite file isn't guaranteed
-  consistent; schedule `VACUUM INTO` to a backup file and snapshot that.
+- **SELinux** is enforcing — volume mounts need `:Z`, or the container is denied reads
+  whose Unix permissions are visibly fine.
+- **firewalld** — 8080 and 8090 on the internal zone only. Nothing is exposed to the
+  internet; Tailscale carries off-LAN access, which is also what makes the one-tap
+  notification buttons work away from home.
+- **SQLite in WAL mode.** A Proxmox snapshot of a live SQLite file is not guaranteed
+  consistent — the real state is spread across `.db`, `-wal` and `-shm`. A nightly
+  `VACUUM INTO` produces a coherent single file; snapshot that.
 
 **Cross-compiling for the Pi:** if Studio 2 is aarch64 (Pi Zero 2 W / CM4), the
 target is tier 1 and trivial. If it's ARMv6 (Pi Zero v1), use `cross` — on Fedora set

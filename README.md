@@ -4,8 +4,19 @@ An autonomous management system for a Gardyn Studio 2 hydroponic garden, in Rust
 
 It reads the garden's sensors and camera, models what is growing in each of the 16
 slots, and tells the operator what to do and when — water, feed, condition, prune,
-harvest, clean — via self-hosted push, email, and a calendar feed. See
-[DESIGN.md](DESIGN.md) for the architecture and the hardware plan.
+harvest, clean — via self-hosted push, email, and a calendar feed.
+
+Everything is self-hosted. No third-party service sits in the runtime path.
+
+| | |
+|---|---|
+| [DESIGN.md](DESIGN.md) | architecture, the capability model, the hardware plan |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Proxmox VM and every container, from an empty hypervisor |
+| [HARDWARE.md](HARDWARE.md) | getting into the Gardyn, wiring probes, firmware takeover |
+| [NOTIFICATIONS.md](NOTIFICATIONS.md) | ntfy, email, and the calendar feed |
+
+Each crate has its own README with a diagram, examples, and — where it touches
+hardware — pinouts.
 
 ## Status
 
