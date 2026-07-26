@@ -1,16 +1,18 @@
 [package]
-name = "gardyn-core"
-description = "Domain model for the Gardyn Studio 2 management system. Pure types, no I/O."
+name = "gardyn-proto"
+description = "Wire format shared between the edge agent and the brain."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+gardyn-core.workspace = true
 jiff.workspace = true
 serde.workspace = true
-serde_json.workspace = true
-uuid.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

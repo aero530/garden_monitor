@@ -239,7 +239,8 @@ mod tests {
         Timestamp::from_second(1_700_000_000).unwrap()
     }
 
-    /// Kale: germinates in 6 days, first harvest 35 days after germination.
+    /// Lacinato Kale, per Gardyn: sprouts in ~14 days, first harvest 58 days after
+    /// germination, derived productive life 103 days.
     fn garden(germinated_days_ago: f64, harvest_count: u32) -> GardenState {
         let mut g = GardenState::new_studio_2(t0());
         let mut p = Planting::new(
@@ -275,29 +276,29 @@ mod tests {
 
     #[test]
     fn the_calendar_fires_on_the_expected_date() {
-        let tasks = engine().evaluate(&garden(36.0, 0)).tasks;
+        let tasks = engine().evaluate(&garden(59.0, 0)).tasks;
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].severity, Severity::Advisory);
     }
 
     #[test]
     fn a_long_missed_harvest_escalates() {
-        let tasks = engine().evaluate(&garden(45.0, 0)).tasks;
+        let tasks = engine().evaluate(&garden(70.0, 0)).tasks;
         assert_eq!(tasks[0].severity, Severity::Important);
         assert!(tasks[0].rationale.contains("reduces the next flush"));
     }
 
     #[test]
     fn each_harvest_pushes_the_next_one_out() {
-        // Day 40 with one harvest taken: next is due at day 45, so nothing yet.
-        assert!(engine().evaluate(&garden(40.0, 1)).tasks.is_empty());
-        assert_eq!(engine().evaluate(&garden(46.0, 1)).tasks.len(), 1);
+        // Day 60 with one harvest taken: the next is due at 58 + 12 = 70.
+        assert!(engine().evaluate(&garden(60.0, 1)).tasks.is_empty());
+        assert_eq!(engine().evaluate(&garden(71.0, 1)).tasks.len(), 1);
     }
 
     #[test]
     fn a_fast_growing_plant_is_harvested_ahead_of_the_book() {
         // Day 30: the book says wait until 35, but the canopy is already there.
-        let g = with_canopy(garden(30.0, 0), 600.0);
+        let g = with_canopy(garden(45.0, 0), 600.0);
         let tasks = engine().evaluate(&g).tasks;
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].source, HarvestByCanopyRule::ID);
@@ -307,7 +308,7 @@ mod tests {
     #[test]
     fn a_slow_growing_plant_is_left_to_keep_growing() {
         // Day 40: the book says harvest, but it is only half the target size.
-        let g = with_canopy(garden(40.0, 0), 260.0);
+        let g = with_canopy(garden(62.0, 0), 200.0);
         assert!(
             engine().evaluate(&g).tasks.is_empty(),
             "measurement should override an optimistic calendar"
@@ -316,7 +317,7 @@ mod tests {
 
     #[test]
     fn an_overgrown_plant_is_escalated_for_crowding() {
-        let g = with_canopy(garden(38.0, 0), 800.0); // >1.3x the 520 threshold
+        let g = with_canopy(garden(60.0, 0), 800.0); // >1.3x the 380 threshold
         let tasks = engine().evaluate(&g).tasks;
         assert_eq!(tasks[0].severity, Severity::Important);
         assert!(tasks[0].rationale.contains("crowding"));
@@ -325,7 +326,7 @@ mod tests {
     #[test]
     fn a_slot_with_no_metrics_falls_back_to_the_calendar() {
         // Vision is on, but this slot has no reading — occluded, or not yet processed.
-        let mut g = garden(40.0, 0);
+        let mut g = garden(59.0, 0);
         g.capabilities.insert(Capability::CanopyMetrics);
         let eval = engine().evaluate(&g);
         assert_eq!(eval.tasks.len(), 1, "must not go silent");
@@ -340,7 +341,7 @@ mod tests {
 
     #[test]
     fn spent_plantings_are_flagged_for_replacement() {
-        let g = garden(160.0, 5); // kale productive life is 150 days
+        let g = garden(120.0, 5); // past the derived 103-day productive life
         let tasks = Engine::new(vec![Box::new(ReplantRule)]).evaluate(&g).tasks;
         assert_eq!(tasks[0].kind, TaskKind::Replant);
         assert_eq!(tasks[0].severity, Severity::Advisory);
@@ -348,7 +349,7 @@ mod tests {
 
     #[test]
     fn declining_plantings_get_a_quiet_heads_up_not_an_alert() {
-        let g = garden(130.0, 5); // decline starts at 120
+        let g = garden(90.0, 5); // decline starts at 80% of 103
         let tasks = Engine::new(vec![Box::new(ReplantRule)]).evaluate(&g).tasks;
         assert_eq!(tasks[0].severity, Severity::Info);
         assert!(!tasks[0].severity.interrupts());

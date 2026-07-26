@@ -178,12 +178,18 @@ impl Store {
         Ok(())
     }
 
-    /// Delete a garden and everything hanging off it. Cascades handle the rest.
+    /// Delete a garden and everything hanging off it.
+    ///
+    /// Foreign keys cascade the rows, but camera frames also have bytes on disk, and
+    /// those the database knows nothing about. Deleting the row and leaving the
+    /// photographs behind would be a slow disk leak and, worse, would keep images of
+    /// someone's home after they asked for them to be gone.
     pub async fn delete_garden(&self, id: GardenId) -> Result<()> {
         sqlx::query("DELETE FROM gardens WHERE id = ?1")
             .bind(id.to_string())
             .execute(&self.db)
             .await?;
+        self.frames.remove_garden_directory(id);
         Ok(())
     }
 

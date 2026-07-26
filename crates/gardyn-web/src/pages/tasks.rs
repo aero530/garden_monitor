@@ -43,6 +43,16 @@ async fn apply(
                 .store
                 .complete_task(garden, key, actor.id(), now)
                 .await?;
+
+            // Close the loop with the plant itself.
+            //
+            // The rule engine is stateless and re-derives from stored state, so
+            // ticking "prune roots" has to move `last_root_check` or the identical
+            // task reappears on the next evaluation. Marking the task done without
+            // this would make completion look like it worked and then silently undo
+            // itself.
+            record_against_planting(state, garden, &task, now).await?;
+
             state
                 .store
                 .log_event(
@@ -75,6 +85,52 @@ async fn apply(
         }
     }
     Ok(())
+}
+
+/// Stamp a completed plant-level task onto its planting.
+///
+/// The task's own target is the source of truth for *which* plant, and it is parsed
+/// from the stored record rather than from the URL, so a task key cannot be used to
+/// aim an update at some other planting.
+async fn record_against_planting(
+    state: &AppState,
+    garden: GardenId,
+    task: &gardyn_store::tasks::TaskRecord,
+    now: jiff::Timestamp,
+) -> Result<(), AppError> {
+    let Some(planting) = planting_target(&task.target) else {
+        return Ok(());
+    };
+    let Some(event) = kind_to_event(&task.kind) else {
+        return Ok(());
+    };
+    state
+        .store
+        .record_planting_event(garden, planting, event, now)
+        .await?;
+    Ok(())
+}
+
+/// Recover a planting id from the rendered target text ("planting 7").
+///
+/// `TaskRecord` stores the target as display text rather than a typed enum, so this
+/// parses it back. Anything unrecognised means the task was not about a plant.
+fn planting_target(target: &str) -> Option<gardyn_core::PlantingId> {
+    target
+        .strip_prefix("planting ")?
+        .trim()
+        .parse()
+        .ok()
+        .map(gardyn_core::PlantingId)
+}
+
+/// Map the stored task kind label back to a planting event.
+fn kind_to_event(kind: &str) -> Option<gardyn_store::plantings::PlantingEvent> {
+    use gardyn_core::TaskKind::*;
+    let parsed = [PruneRoots, PrunePlant, Harvest, Thin]
+        .into_iter()
+        .find(|k| k.label() == kind)?;
+    gardyn_store::plantings::event_for_task(parsed)
 }
 
 async fn act(

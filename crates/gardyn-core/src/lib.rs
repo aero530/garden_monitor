@@ -25,7 +25,7 @@ pub use capability::{Capability, CapabilitySet};
 pub use garden::{DeviceModel, Garden, GardenId};
 pub use planting::{Planting, PlantingId, Stage};
 pub use sensors::{PumpBaseline, SensorSnapshot, ewma};
-pub use slot::{Geometry, SlotId, SlotPosition};
+pub use slot::{Geometry, LightZone, SlotId, SlotPosition};
 pub use state::GardenState;
 pub use tank::{DosingSpec, TankGeometry, TankState};
 pub use task::{DueWindow, RuleId, Severity, Target, Task, TaskDetail, TaskKey, TaskKind};

@@ -1,0 +1,40 @@
+﻿[package]
+name = "gardyn-edge"
+description = "Agent that runs on the Gardyn's Raspberry Pi: recon, telemetry, camera."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+gardyn-core.workspace = true
+gardyn-hal.workspace = true
+gardyn-proto.workspace = true
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true }
+clap = { version = "4", features = ["derive", "env"] }
+# No TLS by default, and that is deliberate. The brain sits on the LAN or behind
+# Tailscale, which already encrypts; pulling in rustls would drag `ring` along, and
+# `ring` needs a C cross-compiler — turning "rustup target add" into "install a
+# toolchain" for anyone building on Windows for a Pi.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Real peripheral access only exists on an ARM Linux board. Gating it here means the
+# crate still builds and tests on a Windows or x86 development machine, against the
+# mock backend, which is where most of the logic gets written.
+[target.'cfg(all(target_os = "linux", any(target_arch = "arm", target_arch = "aarch64")))'.dependencies]
+rppal = "0.19"
+
+[features]
+default = []
+# Enable when the brain is reached over public HTTPS rather than a LAN or Tailscale.
+# Needs a C cross-compiler for the target; use cargo-zigbuild or cross.
+tls = ["reqwest/rustls-tls"]
+
+[lints]
+workspace = true

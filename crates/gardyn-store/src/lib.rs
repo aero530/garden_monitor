@@ -7,12 +7,17 @@
 
 pub mod accounts;
 pub mod fleet;
+pub mod frames;
 pub mod gardens;
+pub mod plantings;
+pub mod readings;
 pub mod schema;
 pub mod tasks;
 
+use frames::FrameStore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Pool, Sqlite};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 pub type Db = Pool<Sqlite>;
@@ -34,11 +39,18 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 #[derive(Clone)]
 pub struct Store {
     pub db: Db,
+    /// Where camera frame bytes live. Kept out of SQLite so backups stay small.
+    pub frames: FrameStore,
 }
 
 impl Store {
-    /// Open (or create) a database at `path` and apply the schema.
+    /// Open (or create) a database at `path`, with frame bytes alongside it.
     pub async fn open(path: &str) -> Result<Self> {
+        Self::open_with(path, default_frame_root()).await
+    }
+
+    /// Open with an explicit directory for frame bytes.
+    pub async fn open_with(path: &str, frame_root: impl Into<PathBuf>) -> Result<Self> {
         let options = SqliteConnectOptions::from_str(path)
             .map_err(StoreError::Database)?
             .create_if_missing(true)
@@ -54,14 +66,18 @@ impl Store {
             .connect_with(options)
             .await?;
 
-        let store = Self { db };
+        let store = Self {
+            db,
+            frames: FrameStore::new(frame_root),
+        };
         store.migrate().await?;
         Ok(store)
     }
 
-    /// An ephemeral database, for tests.
+    /// An ephemeral database with a throwaway frame directory, for tests.
     pub async fn in_memory() -> Result<Self> {
-        Self::open("sqlite::memory:").await
+        let root = std::env::temp_dir().join(format!("gardyn-test-frames-{}", uuid::Uuid::new_v4()));
+        Self::open_with("sqlite::memory:", root).await
     }
 
     async fn migrate(&self) -> Result<()> {
@@ -81,6 +97,10 @@ impl Store {
             .await?;
         Ok(())
     }
+}
+
+fn default_frame_root() -> PathBuf {
+    PathBuf::from("gardyn-data").join("frames")
 }
 
 /// Helpers for the RFC 3339 text used by every timestamp column.

@@ -9,6 +9,8 @@ mod app;
 mod demo;
 mod error;
 mod pages;
+mod render;
+mod state;
 mod ui;
 
 use app::{AppState, Config};
@@ -43,7 +45,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("GARDYN_INSECURE_COOKIES is set — cookies will not be marked Secure");
     }
 
-    let store = Store::open(&database).await?;
+    // Frame bytes live on disk, not in SQLite, so backups stay small.
+    let frame_root = std::env::var("GARDYN_DATA_DIR")
+        .unwrap_or_else(|_| "gardyn-data".into())
+        + "/frames";
+
+    let store = Store::open_with(&database, &frame_root).await?;
+    tracing::info!("camera frames stored under {frame_root}");
     if store.user_count().await? == 0 {
         tracing::info!("no accounts yet — the first to register becomes administrator");
     }
@@ -61,6 +69,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(pages::gardens::routes())
         .merge(pages::auth::routes())
         .merge(pages::members::routes())
+        .merge(pages::frames::routes())
+        .merge(pages::slots::routes())
         .merge(pages::tasks::routes())
         .merge(pages::fleet::routes())
         .merge(api::routes())

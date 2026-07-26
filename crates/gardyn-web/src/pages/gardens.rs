@@ -205,6 +205,10 @@ async fn create(
         )
         .await?;
 
+    // A simulated garden arrives with plants already in it, written as ordinary rows
+    // so they can be harvested, replaced or pulled like any others.
+    demo::seed_plantings(&state.store, &garden, Some(actor.id())).await?;
+
     Ok(Redirect::to(&format!("/gardens/{}", garden.id)).into_response())
 }
 
@@ -217,12 +221,16 @@ async fn detail(
     let (garden, role) = authorize(&state, &actor, id, Permission::ViewGarden).await?;
     let now = state.now();
 
-    // Refresh outstanding work from the rule engine before rendering.
-    let telemetry = demo::state_for(&garden, now);
-    if let Some(garden_state) = &telemetry {
-        let evaluation = gardyn_rules::default_engine().evaluate(garden_state);
-        state.store.sync_tasks(id, &evaluation.tasks, now).await?;
-    }
+    // Refresh outstanding work from the rule engine before rendering. This now runs
+    // for every garden, not just simulated ones: plantings alone are enough for the
+    // calendar rules to have something useful to say.
+    let snapshot = crate::state::build(&state.store, &garden, now).await?;
+    let evaluation = gardyn_rules::default_engine().evaluate(&snapshot);
+    state.store.sync_tasks(id, &evaluation.tasks, now).await?;
+    demo::ensure_frame(&state.store, &garden, &snapshot, now).await?;
+
+    let has_telemetry = crate::state::has_telemetry(&snapshot);
+    let latest_frame = state.store.latest_frame(id).await?;
 
     let tasks = state.store.tasks_for(id).await?;
     let members = state.store.members_of(id).await?;
@@ -246,19 +254,40 @@ async fn detail(
                     }
                 }
                 div.spacer {}
+                a.button href=(format!("/gardens/{id}/slots")) {
+                    "Slots (" (snapshot.occupied_slots()) ")"
+                }
+                a.button href=(format!("/gardens/{id}/frames")) { "Camera" }
                 a.button href=(format!("/gardens/{id}/members")) {
                     "Sharing (" (members.len()) ")"
                 }
             }
 
-            @match &telemetry {
-                Some(garden_state) => (sensors(garden_state)),
-                None => div.card {
-                    h3 { "No telemetry yet" }
+            @if let Some(frame) = &latest_frame {
+                a.card href=(format!("/gardens/{id}/frames"))
+                  style="display:block; text-decoration:none; color:inherit" {
+                    img src=(frame.image_path()) alt="Latest camera frame"
+                        style="width:100%; border-radius:8px; display:block";
+                    p.small.muted style="margin:0.5rem 0 0" {
+                        "Camera · "
+                        (ui::relative(now.as_second() - frame.captured_at.as_second()))
+                        @if !frame.comparable {
+                            " · ambient light, colour not comparable"
+                        }
+                    }
+                }
+            }
+
+            @if has_telemetry {
+                (sensors(&snapshot))
+            } @else {
+                div.card {
+                    h3 { "No sensors reporting" }
                     p.muted.small style="margin:0" {
-                        "Nothing has reported for this garden. The edge agent registers \
-                         itself the first time it runs; until then the rules have nothing \
-                         to work from."
+                        "Nothing is measuring this garden yet — the edge agent registers \
+                         itself the first time it runs. Everything below is worked out \
+                         from what you have planted and when, which is enough for \
+                         thinning, harvest timing, root checks and replanting."
                     }
                 }
             }
@@ -271,10 +300,12 @@ async fn detail(
                 (task_card(task, id, can_act, now))
             }
 
-            @if let Some(garden_state) = &telemetry {
-                h2 { "Slots" }
-                (slots(garden_state))
+            div.row style="margin-top:2rem" {
+                h2 style="margin:0" { "Slots" }
+                div.spacer {}
+                a.small href=(format!("/gardens/{id}/slots")) { "manage" }
             }
+            (slots(&snapshot))
 
             @if !components.is_empty() {
                 h2 { "Hardware" }
@@ -393,30 +424,45 @@ fn sensors(state: &GardenState) -> Markup {
     }
 }
 
+/// The tower as it physically stands: one screen column per real column.
 fn slots(state: &GardenState) -> Markup {
+    let geometry = state.geometry;
     html! {
-        div.slotgrid {
-            @for slot in state.geometry.slots() {
-                @match state.planting_in(slot) {
-                    Some(planting) => {
-                        @let variety = state.variety_of(planting);
-                        div.slot {
-                            strong.small { (slot.to_string()) }
-                            br;
-                            @match variety {
-                                Some(v) => {
-                                    span { (v.name) }
-                                    br;
-                                    span.muted { (planting.stage(v, state.now).label()) }
+        div.tower style=(format!(
+            "grid-template-columns: repeat({}, minmax(0, 1fr))",
+            geometry.columns.max(1)
+        )) {
+            @for column in 0..geometry.columns {
+                div.tower-column {
+                    div.tower-head { "column " (column + 1) }
+                    @for slot in geometry.column(column) {
+                        @let zone = geometry.light_zone(slot);
+                        div.slot-row {
+                            div.zone-strip class=(format!("zone-{}", zone.slug()))
+                                title=(zone.label()) {}
+                            @match state.planting_in(slot) {
+                                Some(planting) => {
+                                    @let variety = state.variety_of(planting);
+                                    div.slot {
+                                        strong.small { (slot.to_string()) }
+                                        br;
+                                        @match variety {
+                                            Some(v) => {
+                                                span { (v.name) }
+                                                br;
+                                                span.muted { (planting.stage(v, state.now).label()) }
+                                            }
+                                            None => span.muted { "unknown variety" }
+                                        }
+                                    }
                                 }
-                                None => span.muted { "unknown variety" }
+                                None => div.slot.empty {
+                                    strong.small { (slot.to_string()) }
+                                    br;
+                                    span { "empty" }
+                                }
                             }
                         }
-                    }
-                    None => div.slot.empty {
-                        strong.small { (slot.to_string()) }
-                        br;
-                        span { "empty" }
                     }
                 }
             }

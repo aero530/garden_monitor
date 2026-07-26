@@ -193,6 +193,26 @@ th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-
 .flash { padding: 0.6rem 0.8rem; border-radius: 8px; background: var(--panel); border: 1px solid var(--accent); }
 .error { color: var(--critical); }
 .slotgrid { display: grid; gap: 0.4rem; grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr)); }
+
+/* The physical tower: one CSS column per real column, slots top to bottom inside it,
+   so what is on screen matches what the operator is looking at. */
+.tower { display: grid; gap: 0.9rem; align-items: start; }
+.tower-column { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+.tower-head {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); text-align: center; padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--line);
+}
+.zone-strip { width: 3px; border-radius: 2px; flex: none; }
+.zone-high { background: var(--advisory); }
+.zone-medium { background: var(--accent); }
+.zone-low { background: var(--line); }
+.slot-row { display: flex; gap: 0.5rem; align-items: stretch; }
+.slot-row > .card, .slot-row > .slot { flex: 1; min-width: 0; margin-bottom: 0; }
+@media (max-width: 34rem) {
+  /* One column at a time on a phone; a two-up tower is unreadable at that width. */
+  .tower { grid-template-columns: 1fr !important; }
+}
 .slot { border: 1px solid var(--line); border-radius: 8px; padding: 0.45rem 0.5rem; background: var(--panel); font-size: 0.8rem; }
 .slot.empty { color: var(--muted); border-style: dashed; }
 code { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 0.85em; }

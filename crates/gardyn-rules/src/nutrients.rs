@@ -473,7 +473,7 @@ mod tests {
         let mut tomato = Planting::new(
             PlantingId(2),
             SlotId(1),
-            VarietyId::new("tomato-cherry"),
+            VarietyId::new("red-cherry-tomato"),
             add_days(t0(), -80.0),
         );
         tomato.germinated_at = Some(add_days(t0(), -70.0));

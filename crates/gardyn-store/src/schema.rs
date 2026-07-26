@@ -67,6 +67,40 @@ CREATE TABLE IF NOT EXISTS invitations (
 CREATE INDEX IF NOT EXISTS invitations_garden ON invitations(garden_id);
 CREATE INDEX IF NOT EXISTS invitations_email ON invitations(email);
 
+-- What is growing where, and what has been done to it.
+--
+-- Ids are per-garden integers rather than UUIDs because they already appear inside
+-- task keys ("harvest:planting:8"), and those keys are only ever resolved after the
+-- garden itself has been authorized — so there is nothing to enumerate.
+--
+-- Removed plantings stay for yield history, which is why the uniqueness constraint
+-- below is partial rather than a plain UNIQUE.
+CREATE TABLE IF NOT EXISTS plantings (
+    garden_id       TEXT NOT NULL REFERENCES gardens(id) ON DELETE CASCADE,
+    id              INTEGER NOT NULL,
+    slot            INTEGER NOT NULL,
+    variety_id      TEXT NOT NULL,
+    planted_at      TEXT NOT NULL,
+    germinated_at   TEXT,
+    thinned_at      TEXT,
+    last_root_check TEXT,
+    last_prune      TEXT,
+    last_harvest    TEXT,
+    harvest_count   INTEGER NOT NULL DEFAULT 0,
+    removed_at      TEXT,
+    notes           TEXT,
+    created_by      TEXT REFERENCES users(id) ON DELETE SET NULL,
+    PRIMARY KEY (garden_id, id)
+);
+
+-- A slot holds at most one living plant. Enforced in the database rather than only in
+-- application code: two people tending a shared garden can submit "plant slot 3" at
+-- the same moment, and a check-then-insert in Rust would let both through.
+CREATE UNIQUE INDEX IF NOT EXISTS plantings_one_live_per_slot
+    ON plantings(garden_id, slot) WHERE removed_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS plantings_garden ON plantings(garden_id, removed_at);
+
 -- Outstanding work. The rule engine is stateless and re-emits every tick, so this is
 -- where completion, snoozing, and escalation actually live, keyed by the rules'
 -- stable task key.
@@ -114,6 +148,53 @@ CREATE TABLE IF NOT EXISTS action_grants (
     expires_at TEXT NOT NULL,
     used_at    TEXT
 );
+
+-- Sensor readings from the edge agent.
+--
+-- Every column is nullable because a probe that is not fitted reports nothing, and
+-- the capability model turns on the difference between "absent" and "zero". Storing
+-- 0.0 for a missing EC probe would silently enable measured dosing against a reading
+-- that does not exist.
+CREATE TABLE IF NOT EXISTS readings (
+    garden_id       TEXT NOT NULL REFERENCES gardens(id) ON DELETE CASCADE,
+    at              TEXT NOT NULL,
+    air_temp_c      REAL,
+    humidity_pct    REAL,
+    pcb_temp_c      REAL,
+    water_level_mm  REAL,
+    water_temp_c    REAL,
+    pump_current_ma REAL,
+    ec_ms_cm        REAL,
+    ph              REAL,
+    agent_version   TEXT,
+    PRIMARY KEY (garden_id, at)
+);
+CREATE INDEX IF NOT EXISTS readings_garden_time ON readings(garden_id, at DESC);
+
+-- Camera frames. The image bytes live on disk; this table is the index.
+--
+-- Blobs are kept out of SQLite deliberately: at one frame an hour a single garden
+-- produces ~8,700 images a year, and putting them in the database would bloat every
+-- backup and every `VACUUM INTO`.
+CREATE TABLE IF NOT EXISTS frames (
+    id           TEXT PRIMARY KEY,
+    garden_id    TEXT NOT NULL REFERENCES gardens(id) ON DELETE CASCADE,
+    captured_at  TEXT NOT NULL,
+    width        INTEGER NOT NULL,
+    height       INTEGER NOT NULL,
+    content_type TEXT NOT NULL,
+    byte_size    INTEGER NOT NULL,
+    -- Light PWM duty at capture, in thousandths. Frames captured at different light
+    -- levels are not photometrically comparable, so anything deriving colour from an
+    -- image has to know this. Null means the agent did not report it.
+    light_duty_milli INTEGER,
+    -- Whether the capture was taken in photo mode, at the reference light level.
+    -- Only comparable frames belong in a colour trend or a time-lapse.
+    comparable   INTEGER NOT NULL DEFAULT 0,
+    source       TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS frames_garden_time ON frames(garden_id, captured_at DESC);
 
 -- Servers and applications: the edge agent, the broker, ntfy, the brain itself.
 -- `garden_id` is null for infrastructure that is not tied to one device.

@@ -7,10 +7,12 @@
 
 use crate::app::AppState;
 use crate::error::AppError;
-use axum::extract::{Path, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, StatusCode, header::AUTHORIZATION};
 use axum::{Json, Router, routing::get, routing::post};
 use gardyn_core::GardenId;
+use gardyn_store::frames::{FrameSource, MAX_FRAME_BYTES, NewFrame};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -19,6 +21,59 @@ pub fn routes() -> Router<AppState> {
         .route("/healthz", get(healthz))
         .route("/api/components/register", post(register))
         .route("/api/components/{id}/heartbeat", post(heartbeat))
+        .route("/api/gardens/{id}/telemetry", post(telemetry))
+        .route(
+            "/api/gardens/{id}/frames",
+            post(upload_frame)
+                // Bound the body before it is buffered, so a runaway agent cannot
+                // exhaust memory ahead of the size check in the handler.
+                .layer(DefaultBodyLimit::max(MAX_FRAME_BYTES)),
+        )
+}
+
+/// Accept a sensor sample from an edge agent.
+///
+/// The brain keeps the pump baseline rather than the agent, because the clean-system
+/// reference outlives any single agent run — a Pi that reboots must not reset the
+/// fouling trend that "time to clean" depends on.
+async fn telemetry(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(report): Json<gardyn_proto::TelemetryReport>,
+) -> Result<Json<gardyn_proto::TelemetryAccepted>, AppError> {
+    authorize_agent(&state, &headers)?;
+
+    let garden: GardenId = id
+        .parse()
+        .map_err(|_| AppError::bad_request("garden must be a valid id"))?;
+    if state.store.find_garden(garden).await?.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    if report.protocol > gardyn_proto::PROTOCOL_VERSION {
+        return Err(AppError::bad_request(format!(
+            "agent speaks protocol {} but this server understands {}",
+            report.protocol,
+            gardyn_proto::PROTOCOL_VERSION
+        )));
+    }
+
+    state
+        .store
+        .record_reading(garden, &report.sensors, Some(&report.agent_version))
+        .await?;
+
+    // Echoed back so an agent can see what the brain inferred, which is the quickest
+    // way to notice a probe that is wired up but reading nothing.
+    let capabilities = report
+        .sensors
+        .capabilities()
+        .iter()
+        .map(|c| c.label().to_string())
+        .collect();
+
+    Ok(Json(gardyn_proto::TelemetryAccepted { capabilities }))
 }
 
 /// Constant-time-ish bearer check.
@@ -128,6 +183,76 @@ async fn heartbeat(
         )
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+pub struct FrameResponse {
+    id: String,
+    url: String,
+}
+
+/// Accept a camera frame from an edge agent.
+///
+/// The body is the raw image; metadata rides in headers so the agent never has to
+/// build a multipart payload on a Pi Zero. Notably the agent does *not* get to declare
+/// the content type — the bytes are sniffed, because a claimed `image/jpeg` carrying
+/// HTML would end up served from our own origin.
+async fn upload_frame(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<FrameResponse>, AppError> {
+    authorize_agent(&state, &headers)?;
+
+    let garden: GardenId = id
+        .parse()
+        .map_err(|_| AppError::bad_request("garden must be a valid id"))?;
+    // Confirm the garden exists before writing a file for it.
+    if state.store.find_garden(garden).await?.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    let header_i64 = |name: &str| -> Option<i64> {
+        headers.get(name)?.to_str().ok()?.trim().parse().ok()
+    };
+    let captured_at = headers
+        .get("x-captured-at")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<jiff::Timestamp>().ok())
+        .unwrap_or_else(|| state.now());
+    let light_duty_milli = header_i64("x-light-duty-milli").map(|d| d.clamp(0, 1000));
+    // Only the agent knows whether it pinned the lights before shooting, and only
+    // frames that did are comparable with each other.
+    let comparable = headers
+        .get("x-photo-mode")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| matches!(v.trim(), "1" | "true" | "yes"));
+
+    let width = header_i64("x-width").unwrap_or(0).clamp(0, 100_000) as u32;
+    let height = header_i64("x-height").unwrap_or(0).clamp(0, 100_000) as u32;
+
+    let stored = state
+        .store
+        .put_frame(NewFrame {
+            garden,
+            captured_at,
+            width,
+            height,
+            light_duty_milli,
+            comparable,
+            source: FrameSource::Agent,
+            bytes: &body,
+        })
+        .await?;
+
+    match stored {
+        Ok(frame) => Ok(Json(FrameResponse {
+            id: frame.id.to_string(),
+            url: format!("{}{}", state.config.base_url, frame.image_path()),
+        })),
+        Err(rejected) => Err(AppError::bad_request(rejected.to_string())),
+    }
 }
 
 #[cfg(test)]

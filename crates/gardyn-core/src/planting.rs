@@ -206,13 +206,17 @@ mod tests {
 
     #[test]
     fn stage_progresses_with_age() {
+        // Lacinato Kale, per Gardyn: first harvest 58 days after germination,
+        // productive life derived as 58 + 45 = 103, so decline starts at ~82.
         let k = kale();
+        assert_eq!(k.days_to_first_harvest, 58);
+        assert_eq!(k.productive_life_days, 103);
+
         assert_eq!(germinated_planting(3.0).stage(&k, t0()), Stage::Seedling);
         assert_eq!(germinated_planting(20.0).stage(&k, t0()), Stage::Vegetative);
-        assert_eq!(germinated_planting(40.0).stage(&k, t0()), Stage::Mature);
-        // productive_life_days is 150, so decline starts at 120.
-        assert_eq!(germinated_planting(130.0).stage(&k, t0()), Stage::Declining);
-        assert_eq!(germinated_planting(160.0).stage(&k, t0()), Stage::Spent);
+        assert_eq!(germinated_planting(60.0).stage(&k, t0()), Stage::Mature);
+        assert_eq!(germinated_planting(90.0).stage(&k, t0()), Stage::Declining);
+        assert_eq!(germinated_planting(110.0).stage(&k, t0()), Stage::Spent);
     }
 
     #[test]
@@ -226,12 +230,12 @@ mod tests {
     #[test]
     fn harvest_schedule_advances_with_each_harvest() {
         let k = kale();
-        let mut p = germinated_planting(35.0);
-        // First harvest is due at day 35, so right now.
+        let mut p = germinated_planting(58.0);
+        // First harvest is due 58 days after germination, so right now.
         assert_eq!(p.days_until_harvest(&k, t0()), Some(0.0));
         p.harvest_count = 1;
-        // Next one is 10 days later.
-        assert_eq!(p.days_until_harvest(&k, t0()), Some(10.0));
+        // Next one is a cut-and-come-again interval later.
+        assert_eq!(p.days_until_harvest(&k, t0()), Some(12.0));
     }
 
     #[test]

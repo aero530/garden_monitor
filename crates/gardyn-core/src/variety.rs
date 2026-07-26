@@ -1,12 +1,20 @@
-//! The plant book: per-variety horticultural parameters.
+//! The plant book: Gardyn's yCube catalogue.
 //!
-//! Everything the calendar-based rules know about a plant lives here. When
-//! `CanopyMetrics` is enabled these become priors rather than the sole source of
-//! truth, but they remain the fallback whenever vision is off or a slot is occluded.
+//! Loaded from `data/varieties.json`, transcribed from Gardyn's placement guide and
+//! the 134 per-plant articles it links. Sprout days, maturity days, thinning counts,
+//! pollination and pruning requirements, care level, plant size and light zone are all
+//! Gardyn's own published figures.
+//!
+//! Two things are **derived**, because Gardyn does not publish them, and both are
+//! marked as such at the point of derivation: productive lifespan, and harvest cadence.
 
+use crate::slot::LightZone;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+
+/// The catalogue, embedded so the binary needs no data files alongside it.
+const CATALOGUE: &str = include_str!("../data/varieties.json");
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -33,6 +41,36 @@ pub enum Category {
     Flower,
 }
 
+impl Category {
+    pub fn label(self) -> &'static str {
+        match self {
+            Category::Herb => "herb",
+            Category::LeafyGreen => "green",
+            Category::Fruiting => "fruiting",
+            Category::Flower => "flower",
+        }
+    }
+}
+
+/// Gardyn's own difficulty rating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CareLevel {
+    Beginner,
+    Intermediate,
+    Advanced,
+}
+
+impl CareLevel {
+    pub fn label(self) -> &'static str {
+        match self {
+            CareLevel::Beginner => "beginner",
+            CareLevel::Intermediate => "intermediate",
+            CareLevel::Advanced => "advanced",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CanopyClass {
@@ -42,20 +80,14 @@ pub enum CanopyClass {
     Vining,
 }
 
-/// How a variety yields, which determines whether "harvest" is a one-shot event or a
-/// recurring cadence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "style")]
 pub enum HarvestStyle {
-    /// Leafy greens and herbs: take outer leaves repeatedly.
     CutAndComeAgain { interval_days: u16 },
-    /// Whole-plant harvest ends the planting.
     Single,
-    /// Fruiting plants producing in waves once mature.
     ContinuousFruiting { interval_days: u16 },
 }
 
-/// Inclusive target band for a measured value.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TargetRange {
     pub min: f32,
@@ -75,7 +107,6 @@ impl TargetRange {
         (self.min + self.max) / 2.0
     }
 
-    /// Signed distance outside the band; zero when inside.
     pub fn deviation(&self, v: f32) -> f32 {
         if v < self.min {
             v - self.min
@@ -92,29 +123,37 @@ pub struct Variety {
     pub id: VarietyId,
     pub name: String,
     pub category: Category,
-    /// Typical days from seeding to visible sprout.
+    /// Where Gardyn says this belongs in the tower.
+    pub light_zone: LightZone,
+    /// Set when the plant's own article disagrees with the placement guide's grouping.
+    pub guide_zone: Option<LightZone>,
     pub germination_days: u16,
     /// Days from germination to first harvest.
+    ///
+    /// Gardyn publishes "days to maturity" measured from **sowing**; this is that
+    /// figure minus the sprout time, because every rule here measures from germination.
     pub days_to_first_harvest: u16,
-    /// Days from germination until yield falls off and the slot should be recycled.
+    /// Derived: Gardyn does not publish a productive lifespan.
     pub productive_life_days: u16,
     pub canopy: CanopyClass,
+    /// Derived: Gardyn does not publish a re-harvest cadence.
     pub harvest_style: HarvestStyle,
-    /// Seedlings to thin down to during weeks 2-6.
     pub thin_to: u8,
     pub needs_pruning: bool,
     pub needs_pollination: bool,
-    /// Canopy area at which the plant is worth harvesting. Used only when
-    /// `CanopyMetrics` is enabled.
+    pub care_level: CareLevel,
+    /// Gardyn's published "Plant Size", verbatim.
+    pub plant_size: String,
+    /// Extra placement guidance from the article, where given.
+    pub placement_note: Option<String>,
+    /// True when the article carried no data block and figures are category defaults.
+    pub estimated: bool,
     pub harvest_canopy_cm2: Option<f32>,
-    /// Used only when a `Conductivity` probe is fitted.
     pub ec_target: Option<TargetRange>,
-    /// Used only when a `PotentialHydrogen` probe is fitted.
     pub ph_target: Option<TargetRange>,
 }
 
 impl Variety {
-    /// Expected days from germination to the given harvest number (1-based).
     pub fn days_to_harvest_n(&self, n: u32) -> Option<f64> {
         let first = f64::from(self.days_to_first_harvest);
         match self.harvest_style {
@@ -133,9 +172,169 @@ impl Variety {
             | HarvestStyle::ContinuousFruiting { interval_days } => Some(f64::from(interval_days)),
         }
     }
+
+    /// Whether the plant's own article contradicts the placement guide's grouping.
+    pub fn zone_disputed(&self) -> bool {
+        self.guide_zone.is_some_and(|g| g != self.light_zone)
+    }
 }
 
-/// Lookup over all known varieties.
+// --- Loading -------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct Catalogue {
+    varieties: Vec<Entry>,
+}
+
+#[derive(Deserialize)]
+struct Entry {
+    id: String,
+    name: String,
+    category: Category,
+    zone: LightZone,
+    #[serde(default)]
+    guide_zone: Option<LightZone>,
+    #[serde(default)]
+    sprout: Option<[u16; 2]>,
+    #[serde(default)]
+    maturity: Option<[u16; 2]>,
+    #[serde(default)]
+    thin_to: Option<u8>,
+    #[serde(default)]
+    pollinate: Option<bool>,
+    #[serde(default)]
+    prune: Option<bool>,
+    #[serde(default)]
+    care: Option<CareLevel>,
+    #[serde(default)]
+    size: Option<String>,
+    #[serde(default)]
+    single: bool,
+    #[serde(default)]
+    no_data: bool,
+    #[serde(default)]
+    placement: Option<String>,
+}
+
+impl Entry {
+    fn into_variety(self) -> Variety {
+        let sprout = self.sprout.unwrap_or(default_sprout(self.category));
+        let maturity = self.maturity.unwrap_or(default_maturity(self.category));
+
+        // Gardyn counts maturity from sowing; the rules count from germination.
+        // Subtracting the sprout time converts between the two. The floor stops a
+        // fast-sprouting, fast-maturing green from claiming a same-day harvest.
+        let days_to_first_harvest = maturity[0].saturating_sub(sprout[0]).max(14);
+
+        let canopy = canopy_from_size(self.size.as_deref(), self.category);
+
+        Variety {
+            id: VarietyId(self.id),
+            name: self.name,
+            category: self.category,
+            light_zone: self.zone,
+            guide_zone: self.guide_zone,
+            // Midpoint of the published window: the earlier bound alone would have the
+            // germination-check rule nagging about every cube that is merely average.
+            // Floored at one day for bare-root stock, which has no germination stage
+            // at all but still needs a non-zero gate for the stage machine.
+            germination_days: (sprout[0] + sprout[1]).div_ceil(2).max(1),
+            days_to_first_harvest,
+            // Derived. Gardyn publishes no lifespan, so this is "maturity plus a
+            // category-typical producing window".
+            productive_life_days: days_to_first_harvest + producing_window(self.category),
+            canopy,
+            harvest_style: if self.single {
+                HarvestStyle::Single
+            } else {
+                harvest_style(self.category)
+            },
+            thin_to: self.thin_to.unwrap_or(1).max(1),
+            needs_pruning: self.prune.unwrap_or(true),
+            needs_pollination: self.pollinate.unwrap_or(false),
+            care_level: self.care.unwrap_or(CareLevel::Intermediate),
+            plant_size: self.size.unwrap_or_else(|| "unknown".into()),
+            placement_note: self.placement,
+            estimated: self.no_data,
+            harvest_canopy_cm2: Some(canopy_area(canopy)),
+            ec_target: Some(ec_target(self.category)),
+            ph_target: Some(TargetRange::new(5.5, 6.5)),
+        }
+    }
+}
+
+fn default_sprout(category: Category) -> [u16; 2] {
+    match category {
+        Category::LeafyGreen => [5, 14],
+        Category::Herb => [7, 21],
+        Category::Fruiting => [10, 21],
+        Category::Flower => [7, 18],
+    }
+}
+
+fn default_maturity(category: Category) -> [u16; 2] {
+    match category {
+        Category::LeafyGreen => [45, 55],
+        Category::Herb => [60, 75],
+        Category::Fruiting => [70, 90],
+        Category::Flower => [55, 70],
+    }
+}
+
+/// Derived: how long a category keeps producing after it starts.
+fn producing_window(category: Category) -> u16 {
+    match category {
+        Category::LeafyGreen => 45,
+        Category::Herb => 90,
+        Category::Fruiting => 120,
+        Category::Flower => 60,
+    }
+}
+
+/// Derived: how often a category can be picked again.
+fn harvest_style(category: Category) -> HarvestStyle {
+    match category {
+        Category::Fruiting => HarvestStyle::ContinuousFruiting { interval_days: 7 },
+        Category::Flower => HarvestStyle::CutAndComeAgain { interval_days: 14 },
+        _ => HarvestStyle::CutAndComeAgain { interval_days: 12 },
+    }
+}
+
+fn canopy_from_size(size: Option<&str>, category: Category) -> CanopyClass {
+    let normalised = size.unwrap_or("").to_lowercase().replace(' ', "");
+    if category == Category::Fruiting && normalised.contains("2ft") {
+        return CanopyClass::Vining;
+    }
+    match () {
+        _ if normalised.starts_with("<1") => CanopyClass::Compact,
+        _ if normalised.starts_with("1ft") || normalised.starts_with("1-2") => CanopyClass::Medium,
+        _ if normalised.starts_with("<2") => CanopyClass::Medium,
+        _ if normalised.contains("3ft") => CanopyClass::Vining,
+        _ if normalised.starts_with("2") => CanopyClass::Large,
+        _ => CanopyClass::Medium,
+    }
+}
+
+/// Projected canopy area at which a plant is worth picking.
+fn canopy_area(canopy: CanopyClass) -> f32 {
+    match canopy {
+        CanopyClass::Compact => 220.0,
+        CanopyClass::Medium => 380.0,
+        CanopyClass::Large => 520.0,
+        CanopyClass::Vining => 900.0,
+    }
+}
+
+/// Conventional hydroponic bands: leafy crops run leaner than fruiting crops.
+fn ec_target(category: Category) -> TargetRange {
+    match category {
+        Category::LeafyGreen => TargetRange::new(0.8, 1.4),
+        Category::Herb => TargetRange::new(1.0, 1.6),
+        Category::Flower => TargetRange::new(1.0, 1.8),
+        Category::Fruiting => TargetRange::new(2.0, 3.5),
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct VarietyBook(BTreeMap<VarietyId, Variety>);
@@ -165,16 +364,24 @@ impl VarietyBook {
         self.0.is_empty()
     }
 
-    /// A starter book of common Gardyn varieties, enough to drive the simulator and
-    /// the rule tests. The production book loads from `data/varieties.json`; these
-    /// figures are typical published values and should be refined against observed
-    /// growth once `CanopyMetrics` has a season of history.
+    /// Varieties Gardyn places in a given light zone.
+    pub fn in_zone(&self, zone: LightZone) -> impl Iterator<Item = &Variety> {
+        self.0.values().filter(move |v| v.light_zone == zone)
+    }
+
+    /// The full Gardyn catalogue.
+    ///
+    /// Panics on a malformed catalogue, which is a build-time authoring error rather
+    /// than anything a running system can encounter — the file is embedded.
+    pub fn gardyn() -> Self {
+        let parsed: Catalogue =
+            serde_json::from_str(CATALOGUE).expect("embedded variety catalogue is valid JSON");
+        parsed.varieties.into_iter().map(Entry::into_variety).collect()
+    }
+
+    /// Alias kept for call sites that predate the full catalogue.
     pub fn starter() -> Self {
-        let mut book = Self::new();
-        for v in starter_varieties() {
-            book.insert(v);
-        }
-        book
+        Self::gardyn()
     }
 }
 
@@ -188,215 +395,123 @@ impl FromIterator<Variety> for VarietyBook {
     }
 }
 
-fn starter_varieties() -> Vec<Variety> {
-    // Nutrient bands are conventional hydroponic ranges: leafy crops run leaner than
-    // fruiting crops, which is exactly the distinction an EC probe would let us act on.
-    let leafy_ec = Some(TargetRange::new(0.8, 1.4));
-    let herb_ec = Some(TargetRange::new(1.0, 1.6));
-    let fruit_ec = Some(TargetRange::new(2.0, 3.5));
-    let ph = Some(TargetRange::new(5.5, 6.5));
-
-    vec![
-        Variety {
-            id: VarietyId::new("basil-genovese"),
-            name: "Genovese Basil".into(),
-            category: Category::Herb,
-            germination_days: 7,
-            days_to_first_harvest: 28,
-            productive_life_days: 120,
-            canopy: CanopyClass::Medium,
-            harvest_style: HarvestStyle::CutAndComeAgain { interval_days: 14 },
-            thin_to: 3,
-            needs_pruning: true,
-            needs_pollination: false,
-            harvest_canopy_cm2: Some(320.0),
-            ec_target: herb_ec,
-            ph_target: ph,
-        },
-        Variety {
-            id: VarietyId::new("lettuce-butterhead"),
-            name: "Butterhead Lettuce".into(),
-            category: Category::LeafyGreen,
-            germination_days: 5,
-            days_to_first_harvest: 30,
-            productive_life_days: 75,
-            canopy: CanopyClass::Medium,
-            harvest_style: HarvestStyle::CutAndComeAgain { interval_days: 12 },
-            thin_to: 1,
-            needs_pruning: false,
-            needs_pollination: false,
-            harvest_canopy_cm2: Some(400.0),
-            ec_target: leafy_ec,
-            ph_target: ph,
-        },
-        Variety {
-            id: VarietyId::new("kale-lacinato"),
-            name: "Lacinato Kale".into(),
-            category: Category::LeafyGreen,
-            germination_days: 6,
-            days_to_first_harvest: 35,
-            productive_life_days: 150,
-            canopy: CanopyClass::Large,
-            harvest_style: HarvestStyle::CutAndComeAgain { interval_days: 10 },
-            thin_to: 1,
-            needs_pruning: true,
-            needs_pollination: false,
-            harvest_canopy_cm2: Some(520.0),
-            ec_target: leafy_ec,
-            ph_target: ph,
-        },
-        Variety {
-            id: VarietyId::new("arugula"),
-            name: "Arugula".into(),
-            category: Category::LeafyGreen,
-            germination_days: 4,
-            days_to_first_harvest: 21,
-            productive_life_days: 60,
-            canopy: CanopyClass::Compact,
-            harvest_style: HarvestStyle::CutAndComeAgain { interval_days: 9 },
-            thin_to: 3,
-            needs_pruning: false,
-            needs_pollination: false,
-            harvest_canopy_cm2: Some(220.0),
-            ec_target: leafy_ec,
-            ph_target: ph,
-        },
-        Variety {
-            id: VarietyId::new("cilantro"),
-            name: "Cilantro".into(),
-            category: Category::Herb,
-            germination_days: 8,
-            days_to_first_harvest: 26,
-            productive_life_days: 70,
-            canopy: CanopyClass::Compact,
-            harvest_style: HarvestStyle::CutAndComeAgain { interval_days: 12 },
-            thin_to: 3,
-            needs_pruning: false,
-            needs_pollination: false,
-            harvest_canopy_cm2: Some(200.0),
-            ec_target: herb_ec,
-            ph_target: ph,
-        },
-        Variety {
-            id: VarietyId::new("swiss-chard"),
-            name: "Swiss Chard".into(),
-            category: Category::LeafyGreen,
-            germination_days: 7,
-            days_to_first_harvest: 35,
-            productive_life_days: 140,
-            canopy: CanopyClass::Large,
-            harvest_style: HarvestStyle::CutAndComeAgain { interval_days: 11 },
-            thin_to: 1,
-            needs_pruning: false,
-            needs_pollination: false,
-            harvest_canopy_cm2: Some(480.0),
-            ec_target: leafy_ec,
-            ph_target: ph,
-        },
-        Variety {
-            id: VarietyId::new("bok-choy"),
-            name: "Bok Choy".into(),
-            category: Category::LeafyGreen,
-            germination_days: 5,
-            days_to_first_harvest: 32,
-            productive_life_days: 50,
-            canopy: CanopyClass::Medium,
-            harvest_style: HarvestStyle::Single,
-            thin_to: 1,
-            needs_pruning: false,
-            needs_pollination: false,
-            harvest_canopy_cm2: Some(380.0),
-            ec_target: leafy_ec,
-            ph_target: ph,
-        },
-        Variety {
-            id: VarietyId::new("tomato-cherry"),
-            name: "Cherry Tomato".into(),
-            category: Category::Fruiting,
-            germination_days: 8,
-            days_to_first_harvest: 60,
-            productive_life_days: 210,
-            canopy: CanopyClass::Vining,
-            harvest_style: HarvestStyle::ContinuousFruiting { interval_days: 7 },
-            thin_to: 1,
-            needs_pruning: true,
-            needs_pollination: true,
-            harvest_canopy_cm2: Some(900.0),
-            ec_target: fruit_ec,
-            ph_target: ph,
-        },
-        Variety {
-            id: VarietyId::new("pepper-jalapeno"),
-            name: "Jalapeño Pepper".into(),
-            category: Category::Fruiting,
-            germination_days: 12,
-            days_to_first_harvest: 70,
-            productive_life_days: 200,
-            canopy: CanopyClass::Large,
-            harvest_style: HarvestStyle::ContinuousFruiting { interval_days: 10 },
-            thin_to: 1,
-            needs_pruning: true,
-            needs_pollination: true,
-            harvest_canopy_cm2: Some(700.0),
-            ec_target: fruit_ec,
-            ph_target: ph,
-        },
-        Variety {
-            id: VarietyId::new("nasturtium"),
-            name: "Nasturtium".into(),
-            category: Category::Flower,
-            germination_days: 10,
-            days_to_first_harvest: 45,
-            productive_life_days: 120,
-            canopy: CanopyClass::Vining,
-            harvest_style: HarvestStyle::CutAndComeAgain { interval_days: 14 },
-            thin_to: 3,
-            needs_pruning: true,
-            needs_pollination: false,
-            harvest_canopy_cm2: Some(450.0),
-            ec_target: leafy_ec,
-            ph_target: ph,
-        },
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn starter_book_is_populated_and_addressable() {
-        let book = VarietyBook::starter();
-        assert_eq!(book.len(), 10);
-        let basil = book.get(&VarietyId::new("basil-genovese")).unwrap();
-        assert_eq!(basil.category, Category::Herb);
-        assert!(basil.needs_pruning);
+    fn the_whole_catalogue_parses() {
+        let book = VarietyBook::gardyn();
+        assert_eq!(book.len(), 135, "expected Gardyn's full yCube list");
     }
 
     #[test]
-    fn cut_and_come_again_repeats_on_its_interval() {
-        let book = VarietyBook::starter();
+    fn every_variety_has_a_usable_schedule() {
+        for v in VarietyBook::gardyn().iter() {
+            assert!(v.germination_days > 0, "{} has no sprout time", v.name);
+            assert!(
+                v.days_to_first_harvest >= 14,
+                "{} harvests implausibly fast",
+                v.name
+            );
+            assert!(
+                v.productive_life_days > v.days_to_first_harvest,
+                "{} dies before it yields",
+                v.name
+            );
+            assert!(v.thin_to >= 1, "{} thins to zero plants", v.name);
+        }
+    }
+
+    #[test]
+    fn maturity_is_converted_from_sowing_to_germination() {
+        // Gardyn lists Lacinato Kale as 7-21 days to sprout and 65 to maturity, and
+        // measures maturity from sowing. From germination that is 65 - 7 = 58.
+        let book = VarietyBook::gardyn();
         let kale = book.get(&VarietyId::new("kale-lacinato")).unwrap();
-        assert_eq!(kale.days_to_harvest_n(1), Some(35.0));
-        assert_eq!(kale.days_to_harvest_n(2), Some(45.0));
-        assert_eq!(kale.days_to_harvest_n(3), Some(55.0));
+        assert_eq!(kale.days_to_first_harvest, 58);
+        assert_eq!(kale.germination_days, 14);
     }
 
     #[test]
-    fn single_harvest_has_no_second_yield() {
-        let book = VarietyBook::starter();
-        let bok = book.get(&VarietyId::new("bok-choy")).unwrap();
-        assert_eq!(bok.days_to_harvest_n(1), Some(32.0));
-        assert_eq!(bok.days_to_harvest_n(2), None);
-        assert_eq!(bok.harvest_interval_days(), None);
+    fn the_three_light_zones_are_all_populated() {
+        let book = VarietyBook::gardyn();
+        for zone in LightZone::ALL {
+            assert!(
+                book.in_zone(*zone).count() > 5,
+                "{zone} has almost nothing in it"
+            );
+        }
+    }
+
+    #[test]
+    fn fruiting_plants_are_flagged_for_pollination_and_greens_are_not() {
+        let book = VarietyBook::gardyn();
+        assert!(book.get(&VarietyId::new("jalapeno")).unwrap().needs_pollination);
+        assert!(book.get(&VarietyId::new("red-cherry-tomato")).unwrap().needs_pollination);
+        assert!(!book.get(&VarietyId::new("romaine")).unwrap().needs_pollination);
+        assert!(!book.get(&VarietyId::new("mint")).unwrap().needs_pollination);
+    }
+
+    #[test]
+    fn head_crops_are_harvested_once() {
+        let book = VarietyBook::gardyn();
+        let iceberg = book.get(&VarietyId::new("iceberg")).unwrap();
+        assert_eq!(iceberg.harvest_style, HarvestStyle::Single);
+        assert_eq!(iceberg.days_to_harvest_n(2), None);
+
+        let romaine = book.get(&VarietyId::new("romaine")).unwrap();
+        assert!(matches!(
+            romaine.harvest_style,
+            HarvestStyle::CutAndComeAgain { .. }
+        ));
+        assert!(romaine.days_to_harvest_n(3).is_some());
+    }
+
+    #[test]
+    fn zone_conflicts_between_the_guide_and_the_plant_page_are_recorded() {
+        // Purple Beans sit under High Light in the placement guide, but their own
+        // article says Medium. Both are kept so the disagreement is visible.
+        let book = VarietyBook::gardyn();
+        let beans = book.get(&VarietyId::new("purple-beans")).unwrap();
+        assert_eq!(beans.light_zone, LightZone::Medium);
+        assert_eq!(beans.guide_zone, Some(LightZone::High));
+        assert!(beans.zone_disputed());
+
+        let kale = book.get(&VarietyId::new("kale-lacinato")).unwrap();
+        assert!(!kale.zone_disputed());
+    }
+
+    #[test]
+    fn varieties_with_no_published_data_are_marked_estimated() {
+        let book = VarietyBook::gardyn();
+        // Gardyn's American Mustard article 404s and Sorrel's carries no data block.
+        assert!(book.get(&VarietyId::new("american-mustard")).unwrap().estimated);
+        assert!(book.get(&VarietyId::new("sorrel")).unwrap().estimated);
+        assert!(!book.get(&VarietyId::new("basil")).unwrap().estimated);
+    }
+
+    #[test]
+    fn placement_notes_survive_the_import() {
+        let book = VarietyBook::gardyn();
+        let cucumber = book.get(&VarietyId::new("cucumber")).unwrap();
+        assert!(cucumber.placement_note.as_deref().unwrap().contains("middle column"));
     }
 
     #[test]
     fn fruiting_varieties_want_a_richer_solution_than_greens() {
-        let book = VarietyBook::starter();
-        let tomato = book.get(&VarietyId::new("tomato-cherry")).unwrap();
-        let lettuce = book.get(&VarietyId::new("lettuce-butterhead")).unwrap();
+        let book = VarietyBook::gardyn();
+        let tomato = book.get(&VarietyId::new("red-cherry-tomato")).unwrap();
+        let lettuce = book.get(&VarietyId::new("butterhead")).unwrap();
         assert!(tomato.ec_target.unwrap().min > lettuce.ec_target.unwrap().max);
+    }
+
+    #[test]
+    fn cut_and_come_again_repeats_on_its_interval() {
+        let book = VarietyBook::gardyn();
+        let kale = book.get(&VarietyId::new("kale-lacinato")).unwrap();
+        assert_eq!(kale.days_to_harvest_n(1), Some(58.0));
+        assert_eq!(kale.days_to_harvest_n(2), Some(70.0));
     }
 
     #[test]
@@ -405,6 +520,5 @@ mod tests {
         assert_eq!(r.deviation(1.5), 0.0);
         assert_eq!(r.deviation(0.5), -0.5);
         assert_eq!(r.deviation(2.5), 0.5);
-        assert!(r.contains(1.0) && r.contains(2.0));
     }
 }

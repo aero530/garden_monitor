@@ -340,7 +340,7 @@ mod tests {
     fn planted_sim() -> Simulation {
         let mut sim = Simulation::new(1, t0());
         sim.plant(SlotId(0), "kale-lacinato");
-        sim.plant(SlotId(1), "basil-genovese");
+        sim.plant(SlotId(1), "basil");
         sim
     }
 
@@ -427,15 +427,17 @@ mod tests {
 
     #[test]
     fn a_well_fed_kale_hits_its_harvest_threshold_on_schedule() {
-        // The variety book says 520 cm² at 35 days post-germination; the growth model
-        // is calibrated against that, so a drift here means the two have diverged.
+        // Gardyn puts Lacinato Kale at ~14 days to sprout and 58 more to first
+        // harvest, with a 380 cm² threshold for its "1 ft" size class. Planted mid
+        // column, where the light model peaks. A drift here means the growth model and
+        // the published figures have diverged.
         let mut sim = Simulation::new(4, t0());
-        sim.plant(SlotId(0), "kale-lacinato");
-        tick_tended(&mut sim, 41); // 6 days to germinate, then 35
+        sim.plant(SlotId(4), "kale-lacinato");
+        tick_tended(&mut sim, 72);
         let canopy = sim.standing_canopy_cm2();
         assert!(
-            (350.0..750.0).contains(&canopy),
-            "canopy {canopy:.0} cm² is far from the 520 cm² the book expects"
+            (250.0..650.0).contains(&canopy),
+            "canopy {canopy:.0} cm² is far from the 380 cm² the book expects"
         );
     }
 
@@ -542,9 +544,10 @@ mod tests {
 
     #[test]
     fn a_single_harvest_variety_is_pulled_when_taken() {
+        // Wheatgrass is a head crop: Gardyn's article describes one cut, not a cadence.
         let mut sim = Simulation::new(3, t0());
-        let id = sim.plant(SlotId(0), "bok-choy");
-        tick_tended(&mut sim,50);
+        let id = sim.plant(SlotId(4), "wheatgrass");
+        tick_tended(&mut sim, 40);
         sim.perform(&task(TaskKind::Harvest, Target::Planting(id), sim.state.now));
         assert!(sim.state.plantings[0].removed_at.is_some());
         assert_eq!(sim.state.occupied_slots(), 0);

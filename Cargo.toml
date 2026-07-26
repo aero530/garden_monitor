@@ -3,6 +3,9 @@ resolver = "3"
 members = [
     "crates/gardyn-auth",
     "crates/gardyn-core",
+    "crates/gardyn-edge",
+    "crates/gardyn-guard",
+    "crates/gardyn-proto",
     "crates/gardyn-hal",
     "crates/gardyn-rules",
     "crates/gardyn-sim",
@@ -20,6 +23,7 @@ license = "MIT"
 gardyn-auth = { path = "crates/gardyn-auth" }
 gardyn-core = { path = "crates/gardyn-core" }
 gardyn-hal = { path = "crates/gardyn-hal" }
+gardyn-proto = { path = "crates/gardyn-proto" }
 gardyn-rules = { path = "crates/gardyn-rules" }
 gardyn-sim = { path = "crates/gardyn-sim" }
 gardyn-store = { path = "crates/gardyn-store" }

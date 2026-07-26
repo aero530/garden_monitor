@@ -10,13 +10,13 @@ use gardyn_sim::scenario::{Operator, Report, run};
 /// A plausible Studio 2 planting: mostly greens and herbs, one fruiting plant.
 const PLANTING: &[(u8, &str)] = &[
     (0, "kale-lacinato"),
-    (1, "lettuce-butterhead"),
-    (2, "basil-genovese"),
-    (3, "swiss-chard"),
+    (1, "butterhead"),
+    (2, "basil"),
+    (3, "red-swiss-chard"),
     (8, "arugula"),
     (9, "cilantro"),
-    (10, "bok-choy"),
-    (11, "tomato-cherry"),
+    (10, "green-bok-choy"),
+    (11, "red-cherry-tomato"),
 ];
 
 fn stocked(seed: u64, capabilities: &[Capability]) -> Simulation {

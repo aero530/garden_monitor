@@ -25,8 +25,8 @@ use nutrients::{
     ConditionerByAlgaeRule, ConditionerRule, PlantFoodByEcRule, PlantFoodByVolumeRule,
 };
 use plants::{
-    PollinationRule, PrunePlantByCanopyRule, PrunePlantRule, ThinByCalendarRule,
-    ThinBySegmentationRule,
+    GerminationCheckRule, PollinationRule, PrunePlantByCanopyRule, PrunePlantRule,
+    ThinByCalendarRule, ThinBySegmentationRule,
 };
 use roots::{RootPruneByFlowRule, RootPruneCadenceRule};
 use rootzone::{PhRule, RootZoneTempRule};
@@ -54,6 +54,7 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(HarvestByCanopyRule),
         Box::new(ReplantRule),
         // Per-plant work
+        Box::new(GerminationCheckRule),
         Box::new(ThinByCalendarRule),
         Box::new(ThinBySegmentationRule),
         Box::new(PrunePlantRule),
@@ -89,7 +90,7 @@ mod tests {
     /// A neglected garden: nearly dry, unfed, unpruned, never cleaned.
     fn neglected() -> GardenState {
         let mut g = GardenState::new_studio_2(t0());
-        for (i, variety) in ["kale-lacinato", "basil-genovese", "tomato-cherry"]
+        for (i, variety) in ["kale-lacinato", "basil", "red-cherry-tomato"]
             .iter()
             .enumerate()
         {
@@ -118,7 +119,7 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), before, "duplicate rule id registered");
-        assert_eq!(before, 20);
+        assert_eq!(before, 21);
     }
 
     #[test]

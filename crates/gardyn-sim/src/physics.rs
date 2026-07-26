@@ -211,10 +211,7 @@ pub fn grow(
             continue;
         }
 
-        let light = geometry
-            .position(plant.slot)
-            .map(|p| p.light_exposure(&geometry))
-            .unwrap_or(1.0);
+        let light = geometry.light_exposure(plant.slot);
 
         // Logistic growth toward a ceiling set by the variety and the slot's light.
         let ceiling = variety.harvest_canopy_cm2.unwrap_or(300.0) * 1.7 * light;
@@ -223,8 +220,8 @@ pub fn grow(
         } else {
             1.0
         };
-        // Calibrated so a well-fed kale reaches its ~520 cm² harvest threshold around
-        // 35 days after germination, matching the variety book.
+        // Calibrated so a well-fed kale in a bright slot reaches its 380 cm² harvest
+        // threshold around 58 days after germination, matching Gardyn's figures.
         let rate = 0.17 * nutrients * temp * light * vigour * (1.0 + rng.noise(env.noise));
         let seeded = plant.canopy_cm2.max(2.0);
         let delta = rate * seeded * (1.0 - seeded / ceiling) * days as f32;

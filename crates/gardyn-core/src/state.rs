@@ -132,11 +132,11 @@ mod tests {
         g.plantings.push(Planting::new(
             PlantingId(1),
             SlotId(0),
-            VarietyId::new("basil-genovese"),
+            VarietyId::new("basil"),
             t0(),
         ));
         let (_, variety) = g.planted().next().unwrap();
-        assert_eq!(variety.name, "Genovese Basil");
+        assert_eq!(variety.name, "Basil");
         assert_eq!(g.occupied_slots(), 1);
         assert_eq!(g.empty_slots().len(), 15);
     }

@@ -152,8 +152,8 @@ mod tests {
     fn stocked(seed: u64) -> Simulation {
         let mut sim = Simulation::new(seed, t0());
         sim.plant(SlotId(0), "kale-lacinato");
-        sim.plant(SlotId(1), "lettuce-butterhead");
-        sim.plant(SlotId(2), "basil-genovese");
+        sim.plant(SlotId(1), "butterhead");
+        sim.plant(SlotId(2), "basil");
         sim.plant(SlotId(8), "arugula");
         sim
     }

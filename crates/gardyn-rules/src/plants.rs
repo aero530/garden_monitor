@@ -290,6 +290,85 @@ impl PrunePlantByCanopyRule {
     }
 }
 
+/// Ask whether a cube has sprouted yet.
+///
+/// Without this the system has a silent dead end. Germination is the gate on every
+/// other per-plant rule — thinning, harvest, root checks and replanting all measure
+/// from it — so a planting whose sprout was never recorded sits at
+/// [`Stage::Seeded`](gardyn_core::Stage::Seeded) forever and quietly generates no
+/// advice at all. The operator has no way to notice that, because the symptom is an
+/// absence.
+pub struct GerminationCheckRule;
+
+impl GerminationCheckRule {
+    pub const ID: RuleId = RuleId::from_static("germination-check");
+    const TAG: &'static str = "germination";
+    /// Grace beyond the variety's expected sprout time before asking.
+    const GRACE_DAYS: f64 = 2.0;
+    /// Documented outside limit: everything should be up within 28 days.
+    const FAILED_DAYS: f64 = 28.0;
+}
+
+impl Rule for GerminationCheckRule {
+    fn id(&self) -> RuleId {
+        Self::ID
+    }
+
+    fn produces(&self) -> &'static [TaskKind] {
+        &[TaskKind::Inspect]
+    }
+
+    fn evaluate(&self, state: &GardenState) -> Vec<Task> {
+        state
+            .planted()
+            .filter(|(p, _)| p.germinated_at.is_none())
+            .filter_map(|(planting, variety)| {
+                let age = planting.age_days(state.now);
+                let expected = f64::from(variety.germination_days);
+                if age < expected + Self::GRACE_DAYS {
+                    return None;
+                }
+
+                let (severity, rationale) = if age >= Self::FAILED_DAYS {
+                    (
+                        Severity::Important,
+                        format!(
+                            "{} was sown {age:.0} days ago and has not been recorded as \
+                             sprouted; past {:.0} days it probably will not — consider \
+                             replacing the cube",
+                            variety.name,
+                            Self::FAILED_DAYS
+                        ),
+                    )
+                } else {
+                    (
+                        Severity::Advisory,
+                        format!(
+                            "{} should have sprouted by now ({age:.0} days, expected \
+                             around {expected:.0}) — mark it sprouted so harvest timing \
+                             can start",
+                            variety.name
+                        ),
+                    )
+                };
+
+                Some(
+                    plant_task(
+                        TaskKind::Inspect,
+                        planting,
+                        severity,
+                        rationale,
+                        state,
+                        Self::ID,
+                        7.0,
+                    )
+                    .with_tag(Self::TAG),
+                )
+            })
+            .collect()
+    }
+}
+
 /// Fruiting plants indoors have no insects, so fruit set depends on the operator.
 pub struct PollinationRule;
 
@@ -419,16 +498,18 @@ mod tests {
     #[test]
     fn pruning_follows_a_cadence_for_varieties_that_need_it() {
         // Basil needs pruning; mature at 28 days post-germination.
-        let tasks = prune_engine().evaluate(&garden("basil-genovese", 40.0)).tasks;
+        let tasks = prune_engine().evaluate(&garden("basil", 70.0)).tasks;
         assert_eq!(tasks.len(), 1);
         assert!(tasks[0].rationale.contains("not been pruned yet"));
     }
 
     #[test]
     fn varieties_that_do_not_need_pruning_are_left_alone() {
+        // Gardyn marks almost everything as needing pruning; Mini Cauliflower is one
+        // of the few articles that explicitly says otherwise.
         assert!(
             prune_engine()
-                .evaluate(&garden("lettuce-butterhead", 40.0))
+                .evaluate(&garden("mini-cauliflower", 70.0))
                 .tasks
                 .is_empty()
         );
@@ -436,10 +517,10 @@ mod tests {
 
     #[test]
     fn a_measured_compact_plant_is_not_pruned_on_a_timer() {
-        let mut g = garden("basil-genovese", 40.0);
+        let mut g = garden("basil", 70.0);
         g.capabilities.insert(Capability::CanopyMetrics);
         g.slot_metrics
-            .insert(SlotId(0), SlotMetrics::new(SlotId(0), t0(), 150.0));
+            .insert(SlotId(0), SlotMetrics::new(SlotId(0), t0(), 120.0));
         assert!(
             prune_engine().evaluate(&g).tasks.is_empty(),
             "small plant, no reason to cut it back"
@@ -448,9 +529,9 @@ mod tests {
 
     #[test]
     fn a_measured_overgrown_plant_is_escalated_for_shading() {
-        let mut g = garden("basil-genovese", 40.0);
+        let mut g = garden("basil", 70.0);
         g.capabilities.insert(Capability::CanopyMetrics);
-        // Basil harvest threshold is 320 cm²; 1.25x is 400.
+        // Basil is compact, so the harvest threshold is 220 cm²; 1.25x is 275.
         g.slot_metrics
             .insert(SlotId(0), SlotMetrics::new(SlotId(0), t0(), 500.0));
         let tasks = prune_engine().evaluate(&g).tasks;
@@ -460,7 +541,7 @@ mod tests {
 
     #[test]
     fn fruiting_plants_are_asked_to_be_pollinated() {
-        let g = garden("tomato-cherry", 70.0);
+        let g = garden("red-cherry-tomato", 70.0);
         let tasks = Engine::new(vec![Box::new(PollinationRule)]).evaluate(&g).tasks;
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].kind, TaskKind::Pollinate);
@@ -473,8 +554,64 @@ mod tests {
     }
 
     #[test]
+    fn a_cube_that_has_not_sprouted_on_time_is_queried() {
+        // Lacinato Kale sprouts in ~14 days; nothing is asked before then.
+        let mut g = GardenState::new_studio_2(t0());
+        let mut p = Planting::new(
+            PlantingId(1),
+            SlotId(0),
+            VarietyId::new("kale-lacinato"),
+            add_days(t0(), -4.0),
+        );
+        p.germinated_at = None;
+        g.plantings.push(p);
+
+        let engine = Engine::new(vec![Box::new(GerminationCheckRule)]);
+        assert!(engine.evaluate(&g).tasks.is_empty(), "too early to ask");
+
+        g.plantings[0].planted_at = add_days(t0(), -20.0);
+        let tasks = engine.evaluate(&g).tasks;
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].severity, Severity::Advisory);
+        assert!(tasks[0].rationale.contains("mark it sprouted"));
+    }
+
+    #[test]
+    fn a_cube_that_never_came_up_is_escalated() {
+        let mut g = GardenState::new_studio_2(t0());
+        g.plantings.push(Planting::new(
+            PlantingId(1),
+            SlotId(0),
+            VarietyId::new("kale-lacinato"),
+            add_days(t0(), -35.0),
+        ));
+        let tasks = Engine::new(vec![Box::new(GerminationCheckRule)]).evaluate(&g).tasks;
+        assert_eq!(tasks[0].severity, Severity::Important);
+        assert!(tasks[0].rationale.contains("replacing the cube"));
+    }
+
+    #[test]
+    fn recording_the_sprout_silences_the_query() {
+        let mut g = GardenState::new_studio_2(t0());
+        let mut p = Planting::new(
+            PlantingId(1),
+            SlotId(0),
+            VarietyId::new("kale-lacinato"),
+            add_days(t0(), -20.0),
+        );
+        p.germinated_at = Some(add_days(t0(), -14.0));
+        g.plantings.push(p);
+        assert!(
+            Engine::new(vec![Box::new(GerminationCheckRule)])
+                .evaluate(&g)
+                .tasks
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn segmentation_suppresses_pollination_when_nothing_is_flowering() {
-        let mut g = garden("tomato-cherry", 70.0);
+        let mut g = garden("red-cherry-tomato", 70.0);
         let mut m = SlotMetrics::new(SlotId(0), t0(), 800.0);
         m.flowering = Some(false);
         g.slot_metrics.insert(SlotId(0), m);
