@@ -10,7 +10,7 @@ is a form post. The whole front end ships inside the binary and still works afte
 months of neglect.
 
 ```sh
-cargo test -p gardyn-web      # 46 tests
+cargo test -p gardyn-web      # 58 tests
 
 GARDYN_INSECURE_COOKIES=1 \
 GARDYN_AGENT_TOKEN=$(openssl rand -hex 32) \
@@ -147,6 +147,23 @@ runaway agent exhausting memory.
 ---
 
 ## Things worth knowing
+
+**Uploaded frames are measured on the way in.** The bytes are already in memory, and
+re-reading them from disk five minutes later to do the same work would be strictly
+worse. A garden with no ROI map is not analysed, and that is the whole switch — see
+[gardyn-vision](../gardyn-vision/). Every failure below that is logged and swallowed,
+because the photograph is worth keeping even when the pipeline cannot read it, and an
+agent that gets a 500 for an unanalysable frame retries it forever.
+
+**Vision capabilities are derived from measurements, not from a setting.** Recent slot
+metrics turn `CanopyMetrics` on; a camera that goes quiet turns it off two days later
+and the canopy rules stand down by themselves. Two days rather than two hours, so one
+dark night does not flap the harvest rule between measured and calendar.
+
+**Completing a garden-level task writes back to the tank.** Feed, condition, refresh
+and deep clean have no planting to record against, and until recently they recorded
+against nothing at all — so they were marked done and re-emitted on the next tick,
+forever. The same failure the plantings already fixed.
 
 **Camera frames go through the same membership check as everything else.** A photograph
 of someone's kitchen is at least as sensitive as the sensor readings beside it. Uploaded

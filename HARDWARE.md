@@ -387,9 +387,22 @@ GARDYN_GUARD_DRY_RUN=1 gardyn-guard --heartbeat /run/gardyn/edge.heartbeat
 Its schedule: 14 h light at 80%, pump 15 min in every 60 at 25% duty, **running
 through the dark hours** — roots do not stop needing water when the lights go off.
 
-> **Actuator control is not implemented.** `gardyn-guard` watches and logs; it does not
-> yet drive the pins. That work belongs with Phase 6 and should not be written
-> speculatively against a peripheral map that Phase 0 may still revise.
+**Actuator control is implemented, and off by default.** Clearing
+`GARDYN_GUARD_DRY_RUN` lets the guard drive the pins; `gardyn-edge run
+--own-actuators` lets the agent drive them from its resident schedule. Neither is a
+default and neither should be turned on before the checklist above is complete.
+
+The two processes hand over through a pair of files: the agent touches
+`/run/gardyn/edge.heartbeat`, and the guard creates `/run/gardyn/guard.engaged` when it
+seizes control. The agent watches for that marker and stands down. Claim happens before
+the first write and the pump stops before release — either order reversed leaves a
+window where both processes own a pin.
+
+```sh
+# What the agent thinks it is driving, without reading the log:
+cat /run/gardyn/edge.heartbeat     # 0.1.0 light=85% pump=25%
+ls /run/gardyn/guard.engaged       # present only while the failsafe is in charge
+```
 
 Also enable the hardware watchdog, so a hung kernel reboots into the safe defaults:
 
@@ -501,13 +514,13 @@ drives the pins another way. See 1.5.
 
 Honest list, so you do not go looking:
 
-- **Actuator control.** `gardyn-guard` watches and logs; nothing drives a pin. Phase 6.
-- **`gardyn-vision`.** Frames are captured, stored and displayed, but no canopy metrics
-  are extracted from real images yet — the `CanopyMetrics` capability is only produced
-  by the simulator.
+- **Nothing verified against real hardware.** Every peripheral address, the PWM
+  channel assignment, and the tank geometry are all still working assumptions from the
+  Home 3.0/4.0 community map. Phase 0 is what turns them into facts.
 - **Tank calibration.** `TankGeometry::STUDIO_2` still holds placeholder distances, so
-  water level will read wrong until they are measured against the real device. They are
-  data, not logic — correcting them is a value change.
+  water level reads wrong until they are measured. `gardyn-cli tank calibrate` fits them
+  from a jug and a few sensor readings, and needs no database — you run it standing next
+  to the device.
 - **MQTT.** Topics are declared in `gardyn-proto`; the transport is HTTP.
 
 `gardyn-notify` **is** built — push, email and the iCal feed all work. Setting them up

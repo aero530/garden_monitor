@@ -20,9 +20,11 @@ hardware — pinouts.
 
 ## Status
 
-Phase 0 (hardware recon) has not started. What exists today is everything that needs
-no hardware: the domain model, the rule engine, a simulator good enough to run a
-season in milliseconds, and a multi-user web application.
+Phase 0 (hardware recon) has not started, and nothing here has met a real Gardyn. What
+exists is every part that can be built and tested without one: the domain model, the
+rule engine, the vision pipeline, a simulator good enough to run a season in
+milliseconds, a multi-user web application, the operator tooling, and actuator control
+that cross-compiles for the Pi and is off by default until Phase 6.
 
 ```mermaid
 flowchart TD
@@ -38,18 +40,22 @@ flowchart TD
   edge["<b>gardyn-edge</b><br/>the Pi agent"]
   guard["<b>gardyn-guard</b><br/>failsafe supervisor"]
 
-  core --> hal & rules & auth & proto & notify
-  hal --> sim & edge & guard
-  rules --> sim & store & web
+  vision["<b>gardyn-vision</b><br/>frame → per-slot metrics"]
+  cli["<b>gardyn-cli</b><br/>operator tool"]
+
+  core --> hal & rules & auth & proto & notify & vision
+  hal --> sim & edge & guard & proto
+  rules --> sim & store & web & cli
   auth --> store & web
   notify --> store & web
   proto --> edge & web
-  store --> web
+  vision --> web & cli
+  store --> web & cli
   sim --> web
   core --> web & edge
 
   classDef bin fill:#2f7d4f22,stroke:#2f7d4f,stroke-width:2px
-  class web,edge,guard,sim bin
+  class web,edge,guard,sim,cli bin
 ```
 
 Green outlines are binaries. Each crate has its own README with a fuller diagram,
@@ -57,17 +63,19 @@ worked examples, and — for the hardware crates — pinouts.
 
 | Crate | | Tests |
 |---|---|---|
-| [gardyn-core](crates/gardyn-core/) | domain types, 135-variety plant book, zero I/O | 79 |
-| [gardyn-hal](crates/gardyn-hal/) | hardware traits + duty-cycle failsafes | 5 |
+| [gardyn-core](crates/gardyn-core/) | domain types, 135-variety plant book, zero I/O | 83 |
+| [gardyn-hal](crates/gardyn-hal/) | hardware traits, schedule, failsafe handover | 24 |
 | [gardyn-proto](crates/gardyn-proto/) | wire format shared by agent and brain | 12 |
 | [gardyn-rules](crates/gardyn-rules/) | 21 rules + capability engine | 87 |
 | [gardyn-auth](crates/gardyn-auth/) | accounts, roles, sharing, signed links | 78 |
 | [gardyn-notify](crates/gardyn-notify/) | ntfy, SMTP, iCal + delivery policy | 44 |
-| [gardyn-store](crates/gardyn-store/) | SQLite persistence + frame storage | 107 |
+| [gardyn-store](crates/gardyn-store/) | SQLite persistence + frame storage | 133 |
+| [gardyn-vision](crates/gardyn-vision/) | frame → canopy, chlorosis, seedling counts | 68 |
 | [gardyn-sim](crates/gardyn-sim/) | physics model + season runner | 32 |
-| [gardyn-web](crates/gardyn-web/) | axum + maud application, agent API | 46 |
-| [gardyn-edge](crates/gardyn-edge/) | Pi agent: recon, telemetry, camera | 22 |
-| [gardyn-guard](crates/gardyn-guard/) | heartbeat supervisor, failsafe | 7 |
+| [gardyn-cli](crates/gardyn-cli/) | calibration, event logging, rule replay | 39 |
+| [gardyn-web](crates/gardyn-web/) | axum + maud application, agent API | 58 |
+| [gardyn-edge](crates/gardyn-edge/) | Pi agent: recon, telemetry, camera | 28 |
+| [gardyn-guard](crates/gardyn-guard/) | heartbeat supervisor, failsafe | 10 |
 
 ## Plantings
 

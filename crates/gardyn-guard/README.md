@@ -7,13 +7,14 @@ program in the workspace on purpose.
 PWM lines and runs a conservative schedule until someone notices.
 
 ```sh
-cargo test -p gardyn-guard    # 7 tests
+cargo test -p gardyn-guard    # 10 tests
 ```
 
-> **Currently dry-run by default, and not wired to any pin.** Until Phase 6, the
-> factory firmware owns the actuators and a fight over PWM is how you lose a crop.
-> Guard runs, watches, and logs what it *would* do — which is exactly what you want
-> while proving a watchdog before trusting it with plants.
+> **Dry-run by default.** Until Phase 6 the factory firmware owns the actuators, and a
+> fight over PWM is how you lose a crop. In dry-run the guard still runs the whole loop
+> and logs what it would have driven, which is exactly what the weeks of watching
+> before you trust a watchdog look like. Clearing `GARDYN_GUARD_DRY_RUN` is what makes
+> it real.
 
 ---
 
@@ -88,6 +89,27 @@ rather than a fast one.
 The duty goes through `gardyn_hal::Duty::pump`, so even a wrong constant here cannot
 exceed the 30% supply ceiling.
 
+## The handover
+
+The guard writes `/run/gardyn/guard.engaged` when it seizes the pins, and the agent
+watches for it and stands down. Ordering is the safety property:
+
+- **Claim, then drive.** The agent has already stood down by the time the first write
+  lands.
+- **Stop the pump, then release.** The reverse would let the agent resume while the
+  failsafe still had the pump running.
+
+A stale marker left by a crashed guard is cleared at start-up, which is safe because
+nothing has engaged yet — whatever is driving the pins keeps driving them.
+
+Standing down stops the pump and **leaves the lights alone**. A pump left running
+floods a room; lights left on for a few extra seconds cost nothing, and switching them
+off on every handover would strobe the garden each time the agent restarted.
+
+`pins.rs` is a second, independent driver rather than one shared with the agent. That
+is the same reasoning as the separate process: sharing a driver would put the agent's
+code back inside the failsafe's address space.
+
 ---
 
 ## Running it
@@ -105,6 +127,7 @@ gardyn-guard \
 | `--grace-seconds` | `GARDYN_GRACE_SECONDS` | `300` | silence before the agent is presumed dead |
 | `--interval-seconds` | — | `15` | how often to look |
 | `--dry-run` | `GARDYN_GUARD_DRY_RUN` | **`true`** | log only; the default until Phase 6 |
+| `--marker` | `GARDYN_GUARD_MARKER` | `/run/gardyn/guard.engaged` | how the agent is told to stand down |
 
 **The grace period is generous on purpose.** A brief stall during a frame upload must
 not cause guard to start fighting the agent for the pins. Five minutes of silence is a

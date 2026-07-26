@@ -3,12 +3,12 @@
 The agent that runs on the Gardyn's Raspberry Pi. Recon, sensor telemetry, camera
 capture, and the parity recording that has to happen before firmware takeover.
 
-**Read-only.** Nothing in this crate writes to an actuator. Phase 1 runs alongside the
-factory firmware, and two processes fighting over the same PWM pin is an excellent way
-to cook a tray of seedlings.
+**Read-only unless you ask otherwise.** Phase 1 runs alongside the factory firmware,
+and two processes fighting over the same PWM pin is an excellent way to cook a tray of
+seedlings. `--own-actuators` is what changes that, and it is not a default.
 
 ```sh
-cargo test -p gardyn-edge     # 22 tests, all runnable on a desktop
+cargo test -p gardyn-edge     # 28 tests, all runnable on a desktop
 ```
 
 The full procedure — imaging the SD card, getting a shell, wiring the probe — is
@@ -153,6 +153,32 @@ upserts on `(garden, timestamp)`, so a double-send is harmless.
 **Frames are not buffered.** They are large, and a missing hourly photo costs far less
 than a full SD card.
 
+Every tick the agent touches its heartbeat file *first*, before reading a sensor or
+talking to the brain. A slow sensor or a stalled upload must never look like a dead
+agent to the failsafe. The note it writes says what the pins are doing, so
+`cat /run/gardyn/edge.heartbeat` answers "what is it driving right now" without
+trawling the log:
+
+```
+0.1.0 light=85% pump=25%
+```
+
+### `run --own-actuators` — Phase 6
+
+Drives the lights and pump from a resident schedule, held in memory and run from the
+Pi's own clock. **The brain is never in this loop**: it sends schedule *updates* on the
+telemetry response, and an agent that cannot reach it keeps running the last one it was
+given. A schedule is validated before adoption and refused if it is not something the
+hardware should be asked to run.
+
+```sh
+./gardyn-edge run --own-actuators          # only after the Phase 6 checklist
+```
+
+`gardyn-guard` arbitrates: when it seizes the pins it creates
+`/run/gardyn/guard.engaged`, and the agent stands down until that file disappears.
+Nothing here can exceed the 30% pump ceiling, because every duty goes through `Duty`.
+
 ---
 
 ## Sensor connections
@@ -256,5 +282,8 @@ Enable `--features tls` only if you are reaching the brain over public HTTPS, an
 | `GARDYN_SAMPLE_SECONDS` | `60` | |
 | `GARDYN_FRAME_SECONDS` | `3600` | `0` disables the camera |
 | `GARDYN_AGENT_NAME` | `gardyn-edge` | shown on `/system` |
+| `GARDYN_OWN_ACTUATORS` | `false` | **Phase 6.** Drive the lights and pump |
+| `GARDYN_HEARTBEAT` | `/run/gardyn/edge.heartbeat` | what keeps the failsafe asleep |
+| `GARDYN_GUARD_MARKER` | `/run/gardyn/guard.engaged` | watched, to know when to stand down |
 
 Installation as a systemd service is [HARDWARE.md §1.3](../../HARDWARE.md).

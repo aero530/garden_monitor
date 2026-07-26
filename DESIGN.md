@@ -432,7 +432,7 @@ target is tier 1 and trivial. If it's ARMv6 (Pi Zero v1), use `cross` — on Fed
 
 ## 12. Crate layout
 
-Eleven crates. Every arrow is a real dependency in `Cargo.toml`; `gardyn-core` is at the
+Thirteen crates. Every arrow is a real dependency in `Cargo.toml`; `gardyn-core` is at the
 bottom of everything and depends on nothing.
 
 ```mermaid
@@ -452,19 +452,22 @@ flowchart TD
   edge["<b>gardyn-edge</b><br/>the Pi agent"]
   guard["<b>gardyn-guard</b><br/>failsafe supervisor"]
 
-  core --> hal & rules & auth & proto & notify
-  hal --> sim & edge & guard
-  rules --> sim & store & web
+  vision["<b>gardyn-vision</b><br/>frame → per-slot metrics"]
+  cli["<b>gardyn-cli</b><br/>operator tool"]
+
+  core --> hal & rules & auth & proto & notify & vision
+  hal --> sim & edge & guard & proto
+  rules --> sim & store & web & cli
   auth --> store & web
   notify --> store & web
   proto --> edge & web
-  store --> web
+  vision --> web & cli
+  store --> web & cli
   sim --> web
-  core --> web
-  core --> edge
+  core --> web & edge
 
   classDef bin fill:#2f7d4f22,stroke:#2f7d4f,stroke-width:2px
-  class web,edge,guard,sim bin
+  class web,edge,guard,sim,cli bin
 ```
 
 Green outlines are the four binaries; the rest are libraries.
@@ -478,14 +481,17 @@ Green outlines are the four binaries; the rest are libraries.
 | `gardyn-proto` | Wire format shared by the agent and the brain | Pi, brain |
 | `gardyn-notify` | ntfy, SMTP and iCal adapters, plus the delivery policy | brain |
 | `gardyn-store` | SQLite persistence and on-disk camera frames | brain |
+| `gardyn-vision` | Camera frame → canopy area, chlorosis, seedling counts | brain, CLI |
 | `gardyn-sim` | Physics model and season runner — **binary** | dev box |
+| `gardyn-cli` | Calibration, event logging, rule replay — **binary** | Fedora VM |
 | `gardyn-web` | The brain: UI, agent API, dispatcher — **binary** | Fedora VM |
 | `gardyn-edge` | Recon, telemetry, camera — **binary** | Raspberry Pi |
 | `gardyn-guard` | Heartbeat supervisor and failsafe — **binary** | Raspberry Pi |
 
-Two crates named in earlier drafts do not exist. `gardyn-vision` was folded into the
-capability model rather than given its own crate, and `gardyn-cli`'s jobs are
-`gardyn-edge` subcommands (`probe`, `read`, `watch-pwm`) instead.
+`gardyn-vision` turns a camera frame into per-slot measurements, and `gardyn-cli` is
+the operator tool that calibrates the hardware those measurements depend on. Note that
+`gardyn-edge` keeps its own `probe`, `read` and `watch-pwm` subcommands: they run on a
+device you have just opened, before the brain or its database exist.
 
 ```
 crates/gardyn-core/data/varieties.json          the catalogue
@@ -528,7 +534,7 @@ gated on hardware.
 | **1** | `gardyn-edge` read-only + parity capture of factory PWM | 1–2 weeks of baseline data |
 | **2** | `gardyn-brain`: ingest, SQLite, state estimation, dashboard, slot/planting model | Water forecasting accurate |
 | **3** | `gardyn-rules` + notifications (ntfy/email/iCal) + ack loop + auto-verify | Useful without vision |
-| **4** | `gardyn-vision` `CanopyMetrics`: undistortion, ROI calibration, canopy tracking | Harvest prediction working |
+| **4** | `gardyn-vision` `CanopyMetrics`: undistortion, ROI calibration, canopy tracking | ✅ built — needs a calibrated garden |
 | **5** | DS18B20 water temperature → root-zone rules | Probe reading reliably |
 | **6** | **Takeover**: `gardyn-guard`, failsafe, cut cloud, own lights + pump, photo mode | Parity proven, rollback tested |
 | **7** | Succession planner | — |

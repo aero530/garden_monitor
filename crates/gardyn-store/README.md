@@ -4,7 +4,7 @@ SQLite persistence, plus the task lifecycle that the stateless rule engine delib
 does not own.
 
 ```sh
-cargo test -p gardyn-store    # 107 tests, 65 of them against a real database
+cargo test -p gardyn-store    # 133 tests, 65 of them against a real database
 ```
 
 Queries are **runtime-checked**, not `sqlx::query!`-macro-checked. That means no
@@ -177,6 +177,31 @@ Fourteen tables in [`src/schema.rs`](src/schema.rs), applied on open.
 | `tasks` | lifecycle state keyed by `TaskKey` |
 | `notifications`, `notification_prefs` | what was sent, to whom, when |
 | `components` | Pi agents and their heartbeats |
+| `tank_events` | what was done to the reservoir, folded forward on read |
+| `vision_config`, `slot_metrics`, `algae_readings` | where the slots are, and what the camera measured |
+| `garden_schedule` | the light and pump programme the Pi should run |
+
+### Timestamps are fixed-width, and that is not cosmetic
+
+Every timestamp column is RFC 3339 text with **exactly nine fractional digits**.
+`jiff`'s `Display` prints the fewest it can — 0, 1, 3, 6 or 9 — and SQLite compares
+text, so `"…:20Z"` sorts *after* `"…:20.5Z"` because `'Z' > '.'`. That silently drops
+rows out of every `BETWEEN`, every `at <= ?`, and every `ORDER BY at`.
+
+It fails by omitting rows rather than by erroring, which is why it survived six hundred
+tests. `ts::PRECISION` pins the width, `NORMALISE_TIMESTAMPS` repairs databases written
+before it, and a test asserts lexical order matches chronological order across each
+precision boundary.
+
+### The tank is an event log
+
+Sensors say how much water is in the tank. They cannot say when it was last fed,
+conditioned or scrubbed — and four rules ask exactly that. Those answers exist only
+because someone recorded the action, so `tank_events` is folded forward on every read
+rather than kept as a mutable row.
+
+Two things follow from that. A mis-logged dose can be deleted and the state recomputes
+correctly, and `gardyn-cli replay` can rebuild the tank as it stood on any past day.
 
 Consumption rate is fitted from level history counting **only downward movement**. An
 early version averaged all deltas, so every refill dragged the fitted rate toward zero
