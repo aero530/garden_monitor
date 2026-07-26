@@ -1,6 +1,6 @@
-# ntfy server configuration for Gardyn.
+# ntfy server configuration for the garden.
 #
-# Install to /etc/gardyn/ntfy-server.yml
+# Install to /etc/garden/ntfy-server.yml
 #
 # Change base-url before starting. Everything else is sensible as-is.
 

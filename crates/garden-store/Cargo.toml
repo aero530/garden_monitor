@@ -1,0 +1,27 @@
+[package]
+name = "garden-store"
+description = "SQLite persistence for accounts, gardens, memberships, tasks, and fleet health."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+garden-auth.workspace = true
+garden-core.workspace = true
+garden-hal.workspace = true
+garden-notify.workspace = true
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros"] }
+
+[dev-dependencies]
+garden-rules.workspace = true
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid.workspace = true
+
+[lints]
+workspace = true

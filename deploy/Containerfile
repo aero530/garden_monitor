@@ -5,7 +5,7 @@
 # business being on a running server.
 #
 # Build from the repository root, not from this directory:
-#     podman build -t localhost/gardyn-web:latest -f deploy/Containerfile .
+#     podman build -t localhost/garden-web:latest -f deploy/Containerfile .
 
 # ---------------------------------------------------------------------------
 # Stage 1 — build
@@ -23,7 +23,7 @@ COPY . .
 
 # --locked so the image is built from the committed Cargo.lock and a dependency
 # cannot quietly change between your machine and the server.
-RUN cargo build --release --locked -p gardyn-web
+RUN cargo build --release --locked -p garden-web
 
 # ---------------------------------------------------------------------------
 # Stage 2 — runtime
@@ -36,24 +36,24 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tzdata \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /src/target/release/gardyn-web /usr/local/bin/gardyn-web
+COPY --from=build /src/target/release/garden-web /usr/local/bin/garden-web
 
-# Matches the uid the Quadlet unit runs as and the owner of /var/lib/gardyn on the
+# Matches the uid the Quadlet unit runs as and the owner of /var/lib/garden on the
 # host. Numeric, not a name, so it stays correct however the image is inspected.
-RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin gardyn
+RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin garden
 USER 1000:1000
 
 # One mount, at the same path inside the container as on the host, so a path in a
 # log line means the same thing in both places. `db/` and `frames/` live under it.
-VOLUME ["/var/lib/gardyn"]
+VOLUME ["/var/lib/garden"]
 
-# GARDYN_DATA_DIR is a parent: the server appends `/frames` to it.
-ENV GARDYN_DB=sqlite:///var/lib/gardyn/db/gardyn.db \
-    GARDYN_DATA_DIR=/var/lib/gardyn \
-    GARDYN_BIND=0.0.0.0:8080
+# GARDEN_DATA_DIR is a parent: the server appends `/frames` to it.
+ENV GARDEN_DB=sqlite:///var/lib/garden/db/garden.db \
+    GARDEN_DATA_DIR=/var/lib/garden \
+    GARDEN_BIND=0.0.0.0:8080
 
 EXPOSE 8080
 
 # No shell form: the binary is pid 1 and gets SIGTERM directly, so a restart is a
 # clean shutdown rather than a ten-second kill.
-ENTRYPOINT ["/usr/local/bin/gardyn-web"]
+ENTRYPOINT ["/usr/local/bin/garden-web"]

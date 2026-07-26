@@ -642,11 +642,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "gardyn-auth"
+name = "garden-auth"
 version = "0.1.0"
 dependencies = [
  "argon2",
- "gardyn-core",
+ "garden-core",
  "jiff",
  "rand 0.9.5",
  "serde",
@@ -656,16 +656,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "gardyn-cli"
+name = "garden-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
- "gardyn-auth",
- "gardyn-core",
- "gardyn-hal",
- "gardyn-rules",
- "gardyn-store",
- "gardyn-vision",
+ "garden-auth",
+ "garden-core",
+ "garden-hal",
+ "garden-rules",
+ "garden-store",
+ "garden-vision",
  "image",
  "jiff",
  "serde",
@@ -676,7 +676,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gardyn-core"
+name = "garden-core"
 version = "0.1.0"
 dependencies = [
  "jiff",
@@ -686,13 +686,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "gardyn-edge"
+name = "garden-edge"
 version = "0.1.0"
 dependencies = [
  "clap",
- "gardyn-core",
- "gardyn-hal",
- "gardyn-proto",
+ "garden-core",
+ "garden-hal",
+ "garden-proto",
  "jiff",
  "reqwest",
  "rppal",
@@ -705,11 +705,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "gardyn-guard"
+name = "garden-guard"
 version = "0.1.0"
 dependencies = [
  "clap",
- "gardyn-hal",
+ "garden-hal",
  "jiff",
  "rppal",
  "thiserror",
@@ -718,10 +718,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "gardyn-hal"
+name = "garden-hal"
 version = "0.1.0"
 dependencies = [
- "gardyn-core",
+ "garden-core",
  "jiff",
  "serde",
  "serde_json",
@@ -729,10 +729,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "gardyn-notify"
+name = "garden-notify"
 version = "0.1.0"
 dependencies = [
- "gardyn-core",
+ "garden-core",
  "jiff",
  "lettre",
  "reqwest",
@@ -743,43 +743,43 @@ dependencies = [
 ]
 
 [[package]]
-name = "gardyn-proto"
+name = "garden-proto"
 version = "0.1.0"
 dependencies = [
- "gardyn-core",
- "gardyn-hal",
+ "garden-core",
+ "garden-hal",
  "jiff",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "gardyn-rules"
+name = "garden-rules"
 version = "0.1.0"
 dependencies = [
- "gardyn-core",
+ "garden-core",
  "jiff",
 ]
 
 [[package]]
-name = "gardyn-sim"
+name = "garden-sim"
 version = "0.1.0"
 dependencies = [
- "gardyn-core",
- "gardyn-hal",
- "gardyn-rules",
+ "garden-core",
+ "garden-hal",
+ "garden-rules",
  "jiff",
 ]
 
 [[package]]
-name = "gardyn-store"
+name = "garden-store"
 version = "0.1.0"
 dependencies = [
- "gardyn-auth",
- "gardyn-core",
- "gardyn-hal",
- "gardyn-notify",
- "gardyn-rules",
+ "garden-auth",
+ "garden-core",
+ "garden-hal",
+ "garden-notify",
+ "garden-rules",
  "jiff",
  "serde",
  "serde_json",
@@ -790,10 +790,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "gardyn-vision"
+name = "garden-vision"
 version = "0.1.0"
 dependencies = [
- "gardyn-core",
+ "garden-core",
  "image",
  "jiff",
  "reqwest",
@@ -804,18 +804,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "gardyn-web"
+name = "garden-web"
 version = "0.1.0"
 dependencies = [
  "axum",
- "gardyn-auth",
- "gardyn-core",
- "gardyn-notify",
- "gardyn-proto",
- "gardyn-rules",
- "gardyn-sim",
- "gardyn-store",
- "gardyn-vision",
+ "garden-auth",
+ "garden-core",
+ "garden-notify",
+ "garden-proto",
+ "garden-rules",
+ "garden-sim",
+ "garden-store",
+ "garden-vision",
  "image",
  "jiff",
  "maud",

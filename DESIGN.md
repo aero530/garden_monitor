@@ -115,8 +115,8 @@ calendar entries into measured triggers.
 flowchart LR
   subgraph pi["Gardyn Studio 2 · Raspberry Pi"]
     direction TB
-    edge["<b>gardyn-edge</b><br/>sensor polling<br/>camera capture<br/>PWM light + pump<br/>offline spool"]
-    guard["<b>gardyn-guard</b><br/>heartbeat watchdog<br/>failsafe PWM takeover"]
+    edge["<b>garden-edge</b><br/>sensor polling<br/>camera capture<br/>PWM light + pump<br/>offline spool"]
+    guard["<b>garden-guard</b><br/>heartbeat watchdog<br/>failsafe PWM takeover"]
     wdt["bcm2835_wdt<br/><i>hardware watchdog</i>"]
     guard -->|"seizes PWM if<br/>the heartbeat stops"| edge
     wdt -->|"reboots a hung kernel"| edge
@@ -124,7 +124,7 @@ flowchart LR
 
   subgraph vm["Fedora 44 VM on Proxmox"]
     direction TB
-    brain["<b>gardyn-web</b> — the brain<br/>ingest → SQLite<br/>state estimation<br/>rule engine → Tasks<br/>vision pipeline<br/>dispatcher<br/>axum + maud UI"]
+    brain["<b>garden-web</b> — the brain<br/>ingest → SQLite<br/>state estimation<br/>rule engine → Tasks<br/>vision pipeline<br/>dispatcher<br/>axum + maud UI"]
     ntfy["<b>ntfy</b><br/><i>container</i>"]
     ts["<b>Tailscale</b><br/>reaches ack links off-LAN<br/>without exposing the VM"]
     brain --> ntfy
@@ -144,7 +144,7 @@ firmware takeover in phase 6. Note also that there is **no message broker**. An 
 draft of this design routed telemetry over MQTT via mosquitto; the implementation uses
 plain HTTP with a bearer token, which removed a container, a protocol, and a class of
 delivery-semantics questions that a device sending one sample a minute did not need.
-`gardyn-proto` still declares MQTT topic names against a future in which the traffic
+`garden-proto` still declares MQTT topic names against a future in which the traffic
 justifies a broker.
 
 ### The load-bearing rule
@@ -163,12 +163,12 @@ Owning the firmware means owning the failure modes. Four layers:
 
 1. **Physical rollback.** Work on a *cloned* SD card. The original stays in a drawer,
    untouched. Rollback is a two-minute card swap, not a reflash.
-2. **Boot-time safe defaults.** `gardyn-failsafe.service` runs before `gardyn-edge`
+2. **Boot-time safe defaults.** `garden-failsafe.service` runs before `garden-edge`
    and applies a conservative schedule (14h light / 10h dark, pump 15 min on /
    45 min off at 25% duty). Even if the main agent never starts, plants get light
    and water.
-3. **Heartbeat supervisor.** `gardyn-guard` is a tiny separate process with minimal
-   dependencies watching a heartbeat file. If `gardyn-edge` stops beating for N
+3. **Heartbeat supervisor.** `garden-guard` is a tiny separate process with minimal
+   dependencies watching a heartbeat file. If `garden-edge` stops beating for N
    minutes, guard seizes the PWM lines and applies the safe schedule. Two processes
    means a panic in the complex one can't take out the simple one.
 4. **Hardware watchdog.** `bcm2835_wdt` plus systemd `RuntimeWatchdogSec` reboots a
@@ -208,7 +208,7 @@ pigs gdc 18; pigs gdc 24                             # live PWM duty, if pigpiod
 ```
 
 **Parity capture — do not skip this.** Before disabling anything, run a
-**read-only** `gardyn-edge` alongside the factory firmware for 1–2 weeks, sampling
+**read-only** `garden-edge` alongside the factory firmware for 1–2 weeks, sampling
 PWM duty on GPIO18/24 at 1 Hz. That gives ground truth for the stock light curve
 (including the sunrise/sunset ramp) and pump duty cycle. Replicate that baseline
 first, then improve on it. Full takeover *requires* the read-only phase rather than
@@ -403,9 +403,9 @@ at `daemon-reload`.
 
 | | |
 |---|---|
-| `gardyn-web` | the brain — built locally from this repo |
-| `gardyn-ntfy` | self-hosted push |
-| `gardyn-ollama` | only if `VisualDiagnosis` is enabled |
+| `garden-web` | the brain — built locally from this repo |
+| `garden-ntfy` | self-hosted push |
+| `garden-ollama` | only if `VisualDiagnosis` is enabled |
 
 There is **no broker.** An earlier version of this section listed `mosquitto` on 1883;
 the transport is HTTP with a bearer token, and the container was removed along with the
@@ -432,28 +432,28 @@ target is tier 1 and trivial. If it's ARMv6 (Pi Zero v1), use `cross` — on Fed
 
 ## 12. Crate layout
 
-Thirteen crates. Every arrow is a real dependency in `Cargo.toml`; `gardyn-core` is at the
+Thirteen crates. Every arrow is a real dependency in `Cargo.toml`; `garden-core` is at the
 bottom of everything and depends on nothing.
 
 ```mermaid
 flowchart TD
-  core["<b>gardyn-core</b><br/>domain types, zero I/O"]
+  core["<b>garden-core</b><br/>domain types, zero I/O"]
 
-  hal["<b>gardyn-hal</b><br/>sensor + actuator traits"]
-  rules["<b>gardyn-rules</b><br/>the rule engine"]
-  auth["<b>gardyn-auth</b><br/>accounts, roles, sharing"]
-  proto["<b>gardyn-proto</b><br/>edge ↔ brain wire format"]
-  notify["<b>gardyn-notify</b><br/>ntfy · SMTP · iCal"]
+  hal["<b>garden-hal</b><br/>sensor + actuator traits"]
+  rules["<b>garden-rules</b><br/>the rule engine"]
+  auth["<b>garden-auth</b><br/>accounts, roles, sharing"]
+  proto["<b>garden-proto</b><br/>edge ↔ brain wire format"]
+  notify["<b>garden-notify</b><br/>ntfy · SMTP · iCal"]
 
-  sim["<b>gardyn-sim</b><br/>physics + season runner"]
-  store["<b>gardyn-store</b><br/>SQLite + frame files"]
+  sim["<b>garden-sim</b><br/>physics + season runner"]
+  store["<b>garden-store</b><br/>SQLite + frame files"]
 
-  web["<b>gardyn-web</b><br/>the brain"]
-  edge["<b>gardyn-edge</b><br/>the Pi agent"]
-  guard["<b>gardyn-guard</b><br/>failsafe supervisor"]
+  web["<b>garden-web</b><br/>the brain"]
+  edge["<b>garden-edge</b><br/>the Pi agent"]
+  guard["<b>garden-guard</b><br/>failsafe supervisor"]
 
-  vision["<b>gardyn-vision</b><br/>frame → per-slot metrics"]
-  cli["<b>gardyn-cli</b><br/>operator tool"]
+  vision["<b>garden-vision</b><br/>frame → per-slot metrics"]
+  cli["<b>garden-cli</b><br/>operator tool"]
 
   core --> hal & rules & auth & proto & notify & vision
   hal --> sim & edge & guard & proto
@@ -474,28 +474,28 @@ Green outlines are the four binaries; the rest are libraries.
 
 | Crate | What it is | Runs on |
 |---|---|---|
-| `gardyn-core` | Domain types and the variety book. No I/O at all. | everywhere |
-| `gardyn-hal` | Traits for sensors and actuators, plus the duty-cycle failsafes | Pi, simulator |
-| `gardyn-rules` | 21 rules and the capability/precedence engine | brain, simulator |
-| `gardyn-auth` | Accounts, roles, garden sharing, sessions, signed action links | brain |
-| `gardyn-proto` | Wire format shared by the agent and the brain | Pi, brain |
-| `gardyn-notify` | ntfy, SMTP and iCal adapters, plus the delivery policy | brain |
-| `gardyn-store` | SQLite persistence and on-disk camera frames | brain |
-| `gardyn-vision` | Camera frame → canopy area, chlorosis, seedling counts | brain, CLI |
-| `gardyn-sim` | Physics model and season runner — **binary** | dev box |
-| `gardyn-cli` | Calibration, event logging, rule replay — **binary** | Fedora VM |
-| `gardyn-web` | The brain: UI, agent API, dispatcher — **binary** | Fedora VM |
-| `gardyn-edge` | Recon, telemetry, camera — **binary** | Raspberry Pi |
-| `gardyn-guard` | Heartbeat supervisor and failsafe — **binary** | Raspberry Pi |
+| `garden-core` | Domain types and the variety book. No I/O at all. | everywhere |
+| `garden-hal` | Traits for sensors and actuators, plus the duty-cycle failsafes | Pi, simulator |
+| `garden-rules` | 21 rules and the capability/precedence engine | brain, simulator |
+| `garden-auth` | Accounts, roles, garden sharing, sessions, signed action links | brain |
+| `garden-proto` | Wire format shared by the agent and the brain | Pi, brain |
+| `garden-notify` | ntfy, SMTP and iCal adapters, plus the delivery policy | brain |
+| `garden-store` | SQLite persistence and on-disk camera frames | brain |
+| `garden-vision` | Camera frame → canopy area, chlorosis, seedling counts | brain, CLI |
+| `garden-sim` | Physics model and season runner — **binary** | dev box |
+| `garden-cli` | Calibration, event logging, rule replay — **binary** | Fedora VM |
+| `garden-web` | The brain: UI, agent API, dispatcher — **binary** | Fedora VM |
+| `garden-edge` | Recon, telemetry, camera — **binary** | Raspberry Pi |
+| `garden-guard` | Heartbeat supervisor and failsafe — **binary** | Raspberry Pi |
 
-`gardyn-vision` turns a camera frame into per-slot measurements, and `gardyn-cli` is
+`garden-vision` turns a camera frame into per-slot measurements, and `garden-cli` is
 the operator tool that calibrates the hardware those measurements depend on. Note that
-`gardyn-edge` keeps its own `probe`, `read` and `watch-pwm` subcommands: they run on a
+`garden-edge` keeps its own `probe`, `read` and `watch-pwm` subcommands: they run on a
 device you have just opened, before the brain or its database exist.
 
 ```
-crates/gardyn-core/data/varieties.json          the catalogue
-crates/gardyn-core/data/variety-details.json    Gardyn's own care text
+crates/garden-core/data/varieties.json          the catalogue
+crates/garden-core/data/variety-details.json    Gardyn's own care text
 deploy/                                         Containerfile, Quadlet units, installer
 ```
 
@@ -503,7 +503,7 @@ deploy/                                         Containerfile, Quadlet units, in
 
 The system is multi-user from the storage layer up: one account holds many gardens,
 and any garden can be shared with other accounts at a role (viewer, caretaker,
-steward, owner). See `gardyn-auth` for the policy and `gardyn-store/tests/tenancy.rs`
+steward, owner). See `garden-auth` for the policy and `garden-store/tests/tenancy.rs`
 for the isolation guarantees exercised against a real database.
 
 Two decisions worth recording:
@@ -519,7 +519,7 @@ Two decisions worth recording:
 Brain: `axum`, `sqlx`/SQLite, `maud` + HTMX (no JS build step), `image`, `ort`,
 `lettre`, `icalendar`, `reqwest`, `tokio-cron-scheduler`.
 
-Because `gardyn-hal` is trait-based, a `SimulatedGarden` backend runs the entire
+Because `garden-hal` is trait-based, a `SimulatedGarden` backend runs the entire
 brain, rules engine, vision pipeline, and UI **on a Windows dev box with no Pi in the
 loop**. Most of the work in this project isn't hardware work, and it shouldn't be
 gated on hardware.
@@ -531,12 +531,12 @@ gated on hardware.
 | Phase | Deliverable | Gate |
 |---|---|---|
 | **0** | Recon: shell access, SD image backup, peripheral inventory | Studio 2 hardware confirmed |
-| **1** | `gardyn-edge` read-only + parity capture of factory PWM | 1–2 weeks of baseline data |
-| **2** | `gardyn-brain`: ingest, SQLite, state estimation, dashboard, slot/planting model | Water forecasting accurate |
-| **3** | `gardyn-rules` + notifications (ntfy/email/iCal) + ack loop + auto-verify | Useful without vision |
-| **4** | `gardyn-vision` `CanopyMetrics`: undistortion, ROI calibration, canopy tracking | ✅ built — needs a calibrated garden |
+| **1** | `garden-edge` read-only + parity capture of factory PWM | 1–2 weeks of baseline data |
+| **2** | `garden-brain`: ingest, SQLite, state estimation, dashboard, slot/planting model | Water forecasting accurate |
+| **3** | `garden-rules` + notifications (ntfy/email/iCal) + ack loop + auto-verify | Useful without vision |
+| **4** | `garden-vision` `CanopyMetrics`: undistortion, ROI calibration, canopy tracking | ✅ built — needs a calibrated garden |
 | **5** | DS18B20 water temperature → root-zone rules | Probe reading reliably |
-| **6** | **Takeover**: `gardyn-guard`, failsafe, cut cloud, own lights + pump, photo mode | Parity proven, rollback tested |
+| **6** | **Takeover**: `garden-guard`, failsafe, cut cloud, own lights + pump, photo mode | Parity proven, rollback tested |
 | **7** | Succession planner | — |
 | *opt* | `PlantSegmentation` (ONNX) — enable any time after phase 4 | — |
 | *opt* | `VisualDiagnosis` (local Ollama VLM) — enable any time after phase 4 | — |
@@ -561,9 +561,9 @@ once the rest is proven and a rollback has been rehearsed.
   after takeover the cloud is cut, so this resolves itself.
 - **Warranty** is almost certainly void once the storage is modified.
 - **Agent failure kills plants.** Mitigated by the four-layer safety model — but the
-  failsafe must be tested by deliberately killing `gardyn-edge` and confirming guard
+  failsafe must be tested by deliberately killing `garden-edge` and confirming guard
   takes over, before Phase 6 goes live.
-- **Pump over-duty** risks the power supply. Enforce the 30% cap in `gardyn-hal`, not
+- **Pump over-duty** risks the power supply. Enforce the 30% cap in `garden-hal`, not
   in calling code.
 
 ---

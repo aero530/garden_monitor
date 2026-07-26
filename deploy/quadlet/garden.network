@@ -1,0 +1,15 @@
+# A private network so the brain can reach ntfy (and Ollama) by container name
+# instead of by IP. Podman runs a DNS server on it; `http://garden-ntfy:8090`
+# resolves from inside garden-web and from nowhere else on the machine.
+#
+# Install to /etc/containers/systemd/garden.network
+
+[Unit]
+Description=Garden internal container network
+
+[Network]
+NetworkName=garden
+# Explicit so it cannot collide with a Proxmox bridge or your LAN. Change it if
+# 10.89.7.0/24 is already in use on your network.
+Subnet=10.89.7.0/24
+Gateway=10.89.7.1

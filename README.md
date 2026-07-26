@@ -1,4 +1,4 @@
-# gardyn
+# garden-monitor
 
 An autonomous management system for a Gardyn Studio 2 hydroponic garden, in Rust.
 
@@ -28,20 +28,20 @@ that cross-compiles for the Pi and is off by default until Phase 6.
 
 ```mermaid
 flowchart TD
-  core["<b>gardyn-core</b><br/>domain types, zero I/O"]
-  hal["<b>gardyn-hal</b><br/>sensor + actuator traits"]
-  rules["<b>gardyn-rules</b><br/>21 rules + capability engine"]
-  auth["<b>gardyn-auth</b><br/>accounts, roles, sharing"]
-  proto["<b>gardyn-proto</b><br/>edge ↔ brain wire format"]
-  notify["<b>gardyn-notify</b><br/>ntfy · SMTP · iCal"]
-  sim["<b>gardyn-sim</b><br/>physics + season runner"]
-  store["<b>gardyn-store</b><br/>SQLite + frame files"]
-  web["<b>gardyn-web</b><br/>the brain"]
-  edge["<b>gardyn-edge</b><br/>the Pi agent"]
-  guard["<b>gardyn-guard</b><br/>failsafe supervisor"]
+  core["<b>garden-core</b><br/>domain types, zero I/O"]
+  hal["<b>garden-hal</b><br/>sensor + actuator traits"]
+  rules["<b>garden-rules</b><br/>21 rules + capability engine"]
+  auth["<b>garden-auth</b><br/>accounts, roles, sharing"]
+  proto["<b>garden-proto</b><br/>edge ↔ brain wire format"]
+  notify["<b>garden-notify</b><br/>ntfy · SMTP · iCal"]
+  sim["<b>garden-sim</b><br/>physics + season runner"]
+  store["<b>garden-store</b><br/>SQLite + frame files"]
+  web["<b>garden-web</b><br/>the brain"]
+  edge["<b>garden-edge</b><br/>the Pi agent"]
+  guard["<b>garden-guard</b><br/>failsafe supervisor"]
 
-  vision["<b>gardyn-vision</b><br/>frame → per-slot metrics"]
-  cli["<b>gardyn-cli</b><br/>operator tool"]
+  vision["<b>garden-vision</b><br/>frame → per-slot metrics"]
+  cli["<b>garden-cli</b><br/>operator tool"]
 
   core --> hal & rules & auth & proto & notify & vision
   hal --> sim & edge & guard & proto
@@ -63,19 +63,19 @@ worked examples, and — for the hardware crates — pinouts.
 
 | Crate | | Tests |
 |---|---|---|
-| [gardyn-core](crates/gardyn-core/) | domain types, 135-variety plant book, zero I/O | 83 |
-| [gardyn-hal](crates/gardyn-hal/) | hardware traits, schedule, failsafe handover | 24 |
-| [gardyn-proto](crates/gardyn-proto/) | wire format shared by agent and brain | 12 |
-| [gardyn-rules](crates/gardyn-rules/) | 21 rules + capability engine | 87 |
-| [gardyn-auth](crates/gardyn-auth/) | accounts, roles, sharing, signed links | 78 |
-| [gardyn-notify](crates/gardyn-notify/) | ntfy, SMTP, iCal + delivery policy | 44 |
-| [gardyn-store](crates/gardyn-store/) | SQLite persistence + frame storage | 133 |
-| [gardyn-vision](crates/gardyn-vision/) | frame → canopy, chlorosis, seedling counts | 68 |
-| [gardyn-sim](crates/gardyn-sim/) | physics model + season runner | 32 |
-| [gardyn-cli](crates/gardyn-cli/) | calibration, event logging, rule replay | 39 |
-| [gardyn-web](crates/gardyn-web/) | axum + maud application, agent API | 58 |
-| [gardyn-edge](crates/gardyn-edge/) | Pi agent: recon, telemetry, camera | 28 |
-| [gardyn-guard](crates/gardyn-guard/) | heartbeat supervisor, failsafe | 10 |
+| [garden-core](crates/garden-core/) | domain types, 135-variety plant book, zero I/O | 83 |
+| [garden-hal](crates/garden-hal/) | hardware traits, schedule, failsafe handover | 24 |
+| [garden-proto](crates/garden-proto/) | wire format shared by agent and brain | 12 |
+| [garden-rules](crates/garden-rules/) | 21 rules + capability engine | 87 |
+| [garden-auth](crates/garden-auth/) | accounts, roles, sharing, signed links | 78 |
+| [garden-notify](crates/garden-notify/) | ntfy, SMTP, iCal + delivery policy | 44 |
+| [garden-store](crates/garden-store/) | SQLite persistence + frame storage | 133 |
+| [garden-vision](crates/garden-vision/) | frame → canopy, chlorosis, seedling counts | 68 |
+| [garden-sim](crates/garden-sim/) | physics model + season runner | 32 |
+| [garden-cli](crates/garden-cli/) | calibration, event logging, rule replay | 39 |
+| [garden-web](crates/garden-web/) | axum + maud application, agent API | 58 |
+| [garden-edge](crates/garden-edge/) | Pi agent: recon, telemetry, camera | 28 |
+| [garden-guard](crates/garden-guard/) | heartbeat supervisor, failsafe | 10 |
 
 ## Plantings
 
@@ -102,15 +102,15 @@ Two things worth knowing:
 
 ```sh
 cargo test --workspace
-cargo run -p gardyn-sim            # 120-day season, or pass a day count
+cargo run -p garden-sim            # 120-day season, or pass a day count
 ```
 
 ### Run the web app
 
 ```sh
-GARDYN_INSECURE_COOKIES=1 \
-GARDYN_AGENT_TOKEN=$(openssl rand -hex 32) \
-cargo run -p gardyn-web
+GARDEN_INSECURE_COOKIES=1 \
+GARDEN_AGENT_TOKEN=$(openssl rand -hex 32) \
+cargo run -p garden-web
 ```
 
 Open <http://localhost:8080>. The first account to register becomes the server
@@ -120,12 +120,12 @@ and task lifecycle working without any hardware.
 
 | Variable | Default | |
 |---|---|---|
-| `GARDYN_DB` | `sqlite://gardyn.db` | |
-| `GARDYN_DATA_DIR` | `gardyn-data` | camera frames land in `$GARDYN_DATA_DIR/frames` |
-| `GARDYN_BIND` | `0.0.0.0:8080` | |
-| `GARDYN_BASE_URL` | `http://$GARDYN_BIND` | used to build invite links |
-| `GARDYN_AGENT_TOKEN` | *unset* | agent API is **closed** when unset |
-| `GARDYN_INSECURE_COOKIES` | *unset* | set only for plain-HTTP development |
+| `GARDEN_DB` | `sqlite://garden.db` | |
+| `GARDEN_DATA_DIR` | `garden-data` | camera frames land in `$GARDEN_DATA_DIR/frames` |
+| `GARDEN_BIND` | `0.0.0.0:8080` | |
+| `GARDEN_BASE_URL` | `http://$GARDEN_BIND` | used to build invite links |
+| `GARDEN_AGENT_TOKEN` | *unset* | agent API is **closed** when unset |
+| `GARDEN_INSECURE_COOKIES` | *unset* | set only for plain-HTTP development |
 
 ## Accounts and sharing
 
@@ -156,7 +156,7 @@ Properties the tests enforce rather than merely document:
 
 ## Camera
 
-Frames are indexed in SQLite and stored as files under `$GARDYN_DATA_DIR/frames`.
+Frames are indexed in SQLite and stored as files under `$GARDEN_DATA_DIR/frames`.
 Blobs stay out of the database deliberately: one frame an hour is ~8,700 images a year
 per garden, which would bloat every backup and every `VACUUM INTO`.
 
@@ -165,7 +165,7 @@ Pi Zero:
 
 ```sh
 curl -X POST "$BASE/api/gardens/$GARDEN_ID/frames" \
-  -H "Authorization: Bearer $GARDYN_AGENT_TOKEN" \
+  -H "Authorization: Bearer $GARDEN_AGENT_TOKEN" \
   -H 'X-Width: 1920' -H 'X-Height: 1080' \
   -H 'X-Light-Duty-Milli: 800' -H 'X-Photo-Mode: true' \
   --data-binary @frame.jpg
@@ -234,7 +234,7 @@ rather than Cargo features.
 **The rule that makes this safe:** a higher-precedence rule wins the whole task kind,
 so it must be a *superset* of the one it displaces. Every measured rule here keeps the
 calendar logic and uses its sensor to fire early or escalate, rather than replacing it.
-`adding_a_capability_never_leaves_a_task_kind_uncovered` in `gardyn-rules` enforces it.
+`adding_a_capability_never_leaves_a_task_kind_uncovered` in `garden-rules` enforces it.
 
 ## Design notes worth knowing
 

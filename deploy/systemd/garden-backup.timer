@@ -1,0 +1,16 @@
+# Install to /etc/systemd/system/garden-backup.timer
+# Then:  sudo systemctl enable --now garden-backup.timer
+
+[Unit]
+Description=Nightly Garden database backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# If the VM was off at 03:30, run once it comes back rather than skipping the day.
+Persistent=true
+# Spread the start over five minutes so a host running several timers does not
+# begin all of them on the same second.
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

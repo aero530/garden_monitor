@@ -61,7 +61,7 @@ This is the step that makes everything else reversible. **Do it before anything.
 ```sh
 # Linux/macOS. Identify the card carefully — dd will happily overwrite the wrong disk.
 lsblk
-sudo dd if=/dev/sdX of=gardyn-original.img bs=4M status=progress conv=fsync
+sudo dd if=/dev/sdX of=garden-original.img bs=4M status=progress conv=fsync
 ```
 
 On Windows, use Win32DiskImager or `Raspberry Pi Imager`'s read function.
@@ -71,7 +71,7 @@ happens on a clone. Rollback is a two-minute card swap, not a reflash.
 
 ```sh
 # Write the clone onto the new card.
-sudo dd if=gardyn-original.img of=/dev/sdY bs=4M status=progress conv=fsync
+sudo dd if=garden-original.img of=/dev/sdY bs=4M status=progress conv=fsync
 ```
 
 > **If the Studio 2 uses eMMC rather than a removable card**, stop and reconsider. You
@@ -101,8 +101,8 @@ them when you have physical access to the storage.
 Boot the clone in the Gardyn and find it:
 
 ```sh
-ping gardyn.local || nmap -sn 192.168.1.0/24
-ssh pi@gardyn.local
+ping garden.local || nmap -sn 192.168.1.0/24
+ssh pi@garden.local
 ```
 
 ### 0.4 Enable the interfaces
@@ -125,14 +125,14 @@ dtoverlay=w1-gpio,gpiopin=4
 Build on your workstation and copy it over (see [Building](#building-for-the-pi)):
 
 ```sh
-scp target/aarch64-unknown-linux-gnu/release/gardyn-edge pi@gardyn.local:~/
-ssh pi@gardyn.local './gardyn-edge probe --out recon-report.json'
+scp target/aarch64-unknown-linux-gnu/release/garden-edge pi@garden.local:~/
+ssh pi@garden.local './garden-edge probe --out recon-report.json'
 ```
 
 You get something like:
 
 ```
-Gardyn edge recon — agent 0.1.0
+Garden edge recon — agent 0.1.0
 
   board    Raspberry Pi Zero 2 W Rev 1.0
   arch     aarch64
@@ -187,12 +187,12 @@ http://brain.local:8080/gardens/6b964894-aaab-4ccd-b3bf-2a39b1ee8d5b
 ### 1.2 Check the agent can reach the brain
 
 ```sh
-export GARDYN_BRAIN_URL=http://brain.local:8080
-export GARDYN_AGENT_TOKEN=<the same value as on the brain>
-export GARDYN_GARDEN_ID=6b964894-aaab-4ccd-b3bf-2a39b1ee8d5b
+export GARDEN_BRAIN_URL=http://brain.local:8080
+export GARDEN_AGENT_TOKEN=<the same value as on the brain>
+export GARDEN_GARDEN_ID=6b964894-aaab-4ccd-b3bf-2a39b1ee8d5b
 
-./gardyn-edge read      # sensors only, no network
-./gardyn-edge report    # sends one sample
+./garden-edge read      # sensors only, no network
+./garden-edge report    # sends one sample
 ```
 
 `report` prints what the brain inferred:
@@ -208,38 +208,38 @@ before you start collecting a week of data without it.
 ### 1.3 Install the daemon
 
 ```sh
-sudo install -m755 gardyn-edge /usr/local/bin/
-sudo mkdir -p /var/lib/gardyn/spool /etc/gardyn
-sudo tee /etc/gardyn/edge.env >/dev/null <<'EOF'
-GARDYN_BRAIN_URL=http://brain.local:8080
-GARDYN_AGENT_TOKEN=replace-me
-GARDYN_GARDEN_ID=replace-me
-GARDYN_SAMPLE_SECONDS=60
-GARDYN_FRAME_SECONDS=3600
-GARDYN_AGENT_NAME=studio-edge
+sudo install -m755 garden-edge /usr/local/bin/
+sudo mkdir -p /var/lib/garden/spool /etc/garden
+sudo tee /etc/garden/edge.env >/dev/null <<'EOF'
+GARDEN_BRAIN_URL=http://brain.local:8080
+GARDEN_AGENT_TOKEN=replace-me
+GARDEN_GARDEN_ID=replace-me
+GARDEN_SAMPLE_SECONDS=60
+GARDEN_FRAME_SECONDS=3600
+GARDEN_AGENT_NAME=studio-edge
 EOF
-sudo chmod 600 /etc/gardyn/edge.env    # it holds the token
+sudo chmod 600 /etc/garden/edge.env    # it holds the token
 ```
 
-`/etc/systemd/system/gardyn-edge.service`:
+`/etc/systemd/system/garden-edge.service`:
 
 ```ini
 [Unit]
-Description=Gardyn edge agent
+Description=Garden edge agent
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/gardyn/edge.env
-ExecStart=/usr/local/bin/gardyn-edge run
+EnvironmentFile=/etc/garden/edge.env
+ExecStart=/usr/local/bin/garden-edge run
 Restart=always
 RestartSec=10
 User=pi
 # Read-only phase: no need for root, and no reason to give it.
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/gardyn
+ReadWritePaths=/var/lib/garden
 
 [Install]
 WantedBy=multi-user.target
@@ -247,8 +247,8 @@ WantedBy=multi-user.target
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl enable --now gardyn-edge
-journalctl -u gardyn-edge -f
+sudo systemctl enable --now garden-edge
+journalctl -u garden-edge -f
 ```
 
 Within a minute the garden should stop saying "No sensors reporting", and the device
@@ -256,7 +256,7 @@ appears on `/system`.
 
 ### 1.4 What happens when the brain is down
 
-The agent buffers to `/var/lib/gardyn/spool` and replays oldest-first on reconnect.
+The agent buffers to `/var/lib/garden/spool` and replays oldest-first on reconnect.
 The brain upserts on `(garden, timestamp)`, so a double-send is harmless. Frames are
 **not** buffered — they are large, and a missing hourly photo costs far less than a
 full SD card.
@@ -264,7 +264,7 @@ full SD card.
 Check a backlog with:
 
 ```sh
-ls /var/lib/gardyn/spool | wc -l
+ls /var/lib/garden/spool | wc -l
 ```
 
 ### 1.5 Parity capture — do not skip this
@@ -274,7 +274,7 @@ the sunrise/sunset ramp, and the pump duty cycle exist only inside the vendor so
 The moment Phase 6 disables it, that record is gone forever.
 
 ```sh
-./gardyn-edge watch-pwm --out pwm-parity.csv --interval-seconds 1
+./garden-edge watch-pwm --out pwm-parity.csv --interval-seconds 1
 ```
 
 Leave it running **one to two weeks**, then commit the CSV. You want at least one full
@@ -345,7 +345,7 @@ symptom — nothing in `/sys/bus/w1/devices/` — looks identical to a wiring mi
 echo "dtoverlay=w1-gpio,gpiopin=4" | sudo tee -a /boot/firmware/config.txt
 sudo reboot
 ls /sys/bus/w1/devices/          # expect a 28-xxxxxxxx entry
-./gardyn-edge read               # water_temp_c should now be populated
+./garden-edge read               # water_temp_c should now be populated
 ```
 
 The capability appears on its own — nothing to configure. The root-zone rules light up
@@ -368,7 +368,7 @@ Deferred, and the software is already written for them. When you fit them:
 - [ ] Phase 1 has run for weeks without dropping samples
 - [ ] `pwm-parity.csv` covers at least one full light cycle, committed
 - [ ] You have swapped back to the original SD card once, to prove rollback works
-- [ ] `gardyn-guard` has been running in dry-run mode and logs sensible setpoints
+- [ ] `garden-guard` has been running in dry-run mode and logs sensible setpoints
 
 Then, and only then:
 
@@ -376,32 +376,32 @@ Then, and only then:
 sudo systemctl disable --now gardyn-agent.service   # whatever the probe found
 ```
 
-`gardyn-guard` handles the failsafe. It is currently **dry-run by default** and logs
+`garden-guard` handles the failsafe. It is currently **dry-run by default** and logs
 what it would drive without touching a pin, because until the takeover the factory
 firmware owns them and a fight over PWM is how you lose a crop.
 
 ```sh
-GARDYN_GUARD_DRY_RUN=1 gardyn-guard --heartbeat /run/gardyn/edge.heartbeat
+GARDEN_GUARD_DRY_RUN=1 garden-guard --heartbeat /run/garden/edge.heartbeat
 ```
 
 Its schedule: 14 h light at 80%, pump 15 min in every 60 at 25% duty, **running
 through the dark hours** — roots do not stop needing water when the lights go off.
 
 **Actuator control is implemented, and off by default.** Clearing
-`GARDYN_GUARD_DRY_RUN` lets the guard drive the pins; `gardyn-edge run
+`GARDEN_GUARD_DRY_RUN` lets the guard drive the pins; `garden-edge run
 --own-actuators` lets the agent drive them from its resident schedule. Neither is a
 default and neither should be turned on before the checklist above is complete.
 
 The two processes hand over through a pair of files: the agent touches
-`/run/gardyn/edge.heartbeat`, and the guard creates `/run/gardyn/guard.engaged` when it
+`/run/garden/edge.heartbeat`, and the guard creates `/run/garden/guard.engaged` when it
 seizes control. The agent watches for that marker and stands down. Claim happens before
 the first write and the pump stops before release — either order reversed leaves a
 window where both processes own a pin.
 
 ```sh
 # What the agent thinks it is driving, without reading the log:
-cat /run/gardyn/edge.heartbeat     # 0.1.0 light=85% pump=25%
-ls /run/gardyn/guard.engaged       # present only while the failsafe is in charge
+cat /run/garden/edge.heartbeat     # 0.1.0 light=85% pump=25%
+ls /run/garden/guard.engaged       # present only while the failsafe is in charge
 ```
 
 Also enable the hardware watchdog, so a hung kernel reboots into the safe defaults:
@@ -423,14 +423,14 @@ Tier 1, already installed on your box:
 
 ```sh
 rustup target add aarch64-unknown-linux-gnu
-cargo build --release -p gardyn-edge --target aarch64-unknown-linux-gnu
+cargo build --release -p garden-edge --target aarch64-unknown-linux-gnu
 ```
 
 You need a linker. Easiest is `cargo-zigbuild`, which needs no cross toolchain:
 
 ```sh
 cargo install cargo-zigbuild
-cargo zigbuild --release -p gardyn-edge --target aarch64-unknown-linux-gnu
+cargo zigbuild --release -p garden-edge --target aarch64-unknown-linux-gnu
 ```
 
 ### armv6 — Pi Zero (original), Pi 1
@@ -440,7 +440,7 @@ Tier 2, and the awkward case:
 ```sh
 rustup target add arm-unknown-linux-gnueabihf
 cargo install cross
-CROSS_CONTAINER_ENGINE=podman cross build --release -p gardyn-edge \
+CROSS_CONTAINER_ENGINE=podman cross build --release -p garden-edge \
   --target arm-unknown-linux-gnueabihf
 ```
 
@@ -451,7 +451,7 @@ the original board pristine, and everything downstream gets easier.
 
 ```sh
 sudo dnf install -y zig            # for cargo-zigbuild
-cargo zigbuild --release -p gardyn-edge --target aarch64-unknown-linux-gnu
+cargo zigbuild --release -p garden-edge --target aarch64-unknown-linux-gnu
 ```
 
 ---
@@ -460,13 +460,13 @@ cargo zigbuild --release -p gardyn-edge --target aarch64-unknown-linux-gnu
 
 | Command | Needs brain? | Needs token? | What it does |
 |---|---|---|---|
-| `gardyn-edge probe` | no | no | Phase 0 recon, writes JSON |
-| `gardyn-edge read` | no | no | One sensor read, printed |
-| `gardyn-edge report` | yes | yes | One sensor read, sent |
-| `gardyn-edge capture` | yes | yes | One photo, uploaded |
-| `gardyn-edge watch-pwm` | no | no | Parity capture to CSV |
-| `gardyn-edge run` | yes | yes | The daemon |
-| `gardyn-guard` | no | no | Failsafe supervisor (dry-run) |
+| `garden-edge probe` | no | no | Phase 0 recon, writes JSON |
+| `garden-edge read` | no | no | One sensor read, printed |
+| `garden-edge report` | yes | yes | One sensor read, sent |
+| `garden-edge capture` | yes | yes | One photo, uploaded |
+| `garden-edge watch-pwm` | no | no | Parity capture to CSV |
+| `garden-edge run` | yes | yes | The daemon |
+| `garden-guard` | no | no | Failsafe supervisor (dry-run) |
 
 `probe`, `read` and `watch-pwm` deliberately need nothing but the binary. They are what
 you run on a device you have just opened, possibly before the brain exists.
@@ -475,13 +475,13 @@ you run on a device you have just opened, possibly before the brain exists.
 
 | Variable | Default | |
 |---|---|---|
-| `GARDYN_BRAIN_URL` | `http://localhost:8080` | |
-| `GARDYN_AGENT_TOKEN` | *empty* | must match the brain |
-| `GARDYN_GARDEN_ID` | — | from the garden's URL |
-| `GARDYN_SPOOL_DIR` | `/var/lib/gardyn/spool` | offline buffer |
-| `GARDYN_SAMPLE_SECONDS` | `60` | |
-| `GARDYN_FRAME_SECONDS` | `3600` | `0` disables the camera |
-| `GARDYN_AGENT_NAME` | `gardyn-edge` | shown on `/system` |
+| `GARDEN_BRAIN_URL` | `http://localhost:8080` | |
+| `GARDEN_AGENT_TOKEN` | *empty* | must match the brain |
+| `GARDEN_GARDEN_ID` | — | from the garden's URL |
+| `GARDEN_SPOOL_DIR` | `/var/lib/garden/spool` | offline buffer |
+| `GARDEN_SAMPLE_SECONDS` | `60` | |
+| `GARDEN_FRAME_SECONDS` | `3600` | `0` disables the camera |
+| `GARDEN_AGENT_NAME` | `garden-edge` | shown on `/system` |
 
 ---
 
@@ -490,10 +490,10 @@ you run on a device you have just opened, possibly before the brain exists.
 **`probe` shows no I²C devices.** Bus disabled or ribbon unseated. `sudo raspi-config
 nonint do_i2c 0`, reboot, then `i2cdetect -y 1` to confirm independently.
 
-**`report` returns 401.** `GARDYN_AGENT_TOKEN` does not match the brain's. The brain
-logs `GARDYN_AGENT_TOKEN is unset — the agent API is closed` at startup if it has none.
+**`report` returns 401.** `GARDEN_AGENT_TOKEN` does not match the brain's. The brain
+logs `GARDEN_AGENT_TOKEN is unset — the agent API is closed` at startup if it has none.
 
-**`report` returns 404.** Wrong `GARDYN_GARDEN_ID`, or the garden was deleted.
+**`report` returns 404.** Wrong `GARDEN_GARDEN_ID`, or the garden was deleted.
 
 **Capture fails with "no capture tool found".**
 `sudo apt install -y rpicam-apps` or `sudo apt install -y fswebcam` for a USB camera.
@@ -503,7 +503,7 @@ Check `ls /sys/bus/w1/devices/` shows a `28-` entry first — no entry means wir
 the missing overlay; an entry with no reading means the resistor.
 
 **Dashboard still says "No sensors reporting".** The garden has no readings at all.
-Check `journalctl -u gardyn-edge -n 50` and the spool depth.
+Check `journalctl -u garden-edge -n 50` and the spool depth.
 
 **Every `watch-pwm` row says `unavailable`.** `pigpiod` is not running, or the vendor
 drives the pins another way. See 1.5.
@@ -518,11 +518,11 @@ Honest list, so you do not go looking:
   channel assignment, and the tank geometry are all still working assumptions from the
   Home 3.0/4.0 community map. Phase 0 is what turns them into facts.
 - **Tank calibration.** `TankGeometry::STUDIO_2` still holds placeholder distances, so
-  water level reads wrong until they are measured. `gardyn-cli tank calibrate` fits them
+  water level reads wrong until they are measured. `garden-cli tank calibrate` fits them
   from a jug and a few sensor readings, and needs no database — you run it standing next
   to the device.
-- **MQTT.** Topics are declared in `gardyn-proto`; the transport is HTTP.
+- **MQTT.** Topics are declared in `garden-proto`; the transport is HTTP.
 
-`gardyn-notify` **is** built — push, email and the iCal feed all work. Setting them up
+`garden-notify` **is** built — push, email and the iCal feed all work. Setting them up
 is [NOTIFICATIONS.md](NOTIFICATIONS.md); the server side is
 [DEPLOYMENT.md](DEPLOYMENT.md).

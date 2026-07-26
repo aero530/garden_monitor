@@ -1,8 +1,8 @@
 target/
 
-# Runtime state written by `cargo run -p gardyn-web`.
+# Runtime state written by `cargo run -p garden-web`.
 # The database and the camera frames beside it are per-deployment data, not source.
-gardyn.db
-gardyn.db-shm
-gardyn.db-wal
-gardyn-data/
+garden.db
+garden.db-shm
+garden.db-wal
+garden-data/

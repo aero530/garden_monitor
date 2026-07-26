@@ -1,0 +1,22 @@
+﻿[package]
+name = "garden-notify"
+description = "Getting a task onto your phone: self-hosted ntfy, email, and a calendar feed."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+garden-core.workspace = true
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1", "tokio1-rustls-tls"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

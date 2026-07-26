@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Install the Gardyn brain onto a Fedora host.
+# Install the Garden brain onto a Fedora host.
 #
 # Idempotent: safe to re-run after editing a unit or rebuilding the image. It will
-# not overwrite /etc/gardyn/web.env or /etc/gardyn/ntfy-server.yml once they exist,
+# not overwrite /etc/garden/web.env or /etc/garden/ntfy-server.yml once they exist,
 # because those hold your secrets and your URLs.
 #
 # Run from the repository root:
@@ -38,14 +38,14 @@ esac
 echo "podman $version"
 
 say "Creating directories"
-install -d -o "$UID_GID" -m 0750 /var/lib/gardyn /var/lib/gardyn/db \
-  /var/lib/gardyn/frames /var/lib/gardyn/backups
-install -d -o "$UID_GID" -m 0750 /var/lib/gardyn-ntfy /var/cache/gardyn-ntfy
-install -d -m 0750 /etc/gardyn
+install -d -o "$UID_GID" -m 0750 /var/lib/garden /var/lib/garden/db \
+  /var/lib/garden/frames /var/lib/garden/backups
+install -d -o "$UID_GID" -m 0750 /var/lib/garden-ntfy /var/cache/garden-ntfy
+install -d -m 0750 /etc/garden
 
 say "Installing configuration templates"
-for pair in "web.env.example:/etc/gardyn/web.env" \
-            "ntfy-server.yml:/etc/gardyn/ntfy-server.yml"; do
+for pair in "web.env.example:/etc/garden/web.env" \
+            "ntfy-server.yml:/etc/garden/ntfy-server.yml"; do
   src="${pair%%:*}"; dst="${pair##*:}"
   if [ -e "$dst" ]; then
     echo "keeping existing $dst"
@@ -55,23 +55,23 @@ for pair in "web.env.example:/etc/gardyn/web.env" \
   fi
 done
 # ntfy reads its config as uid 1000 and will not start if it cannot.
-chown "$UID_GID" /etc/gardyn/ntfy-server.yml
+chown "$UID_GID" /etc/garden/ntfy-server.yml
 
 say "Installing Quadlet units"
 install -d -m 0755 /etc/containers/systemd
-for unit in gardyn.network gardyn-web.container gardyn-ntfy.container; do
+for unit in garden.network garden-web.container garden-ntfy.container; do
   install -m 0644 "$HERE/quadlet/$unit" "/etc/containers/systemd/$unit"
   echo "  $unit"
 done
-echo "  (gardyn-ollama.container not installed — see DEPLOYMENT.md, optional)"
+echo "  (garden-ollama.container not installed — see DEPLOYMENT.md, optional)"
 
 say "Installing the backup job"
-install -m 0755 "$HERE/gardyn-backup" /usr/local/bin/gardyn-backup
-install -m 0644 "$HERE/systemd/gardyn-backup.service" /etc/systemd/system/
-install -m 0644 "$HERE/systemd/gardyn-backup.timer" /etc/systemd/system/
+install -m 0755 "$HERE/garden-backup" /usr/local/bin/garden-backup
+install -m 0644 "$HERE/systemd/garden-backup.service" /etc/systemd/system/
+install -m 0644 "$HERE/systemd/garden-backup.timer" /etc/systemd/system/
 
 say "Building the image (this takes several minutes the first time)"
-podman build -t localhost/gardyn-web:latest -f "$HERE/Containerfile" "$REPO"
+podman build -t localhost/garden-web:latest -f "$HERE/Containerfile" "$REPO"
 
 say "Reloading systemd"
 # Quadlet is a systemd *generator*: daemon-reload is what turns the .container
@@ -92,24 +92,24 @@ cat <<'DONE'
 
 ==> Installed. Two things left, both of which need your input:
 
-  1. Edit /etc/gardyn/ntfy-server.yml  — set base-url to how your PHONE will
+  1. Edit /etc/garden/ntfy-server.yml  — set base-url to how your PHONE will
      reach ntfy, then:
 
-       sudo systemctl enable --now gardyn-ntfy
-       sudo podman exec -it systemd-gardyn-ntfy ntfy user add --role=admin gardyn
-       sudo podman exec -it systemd-gardyn-ntfy ntfy token add gardyn
+       sudo systemctl enable --now garden-ntfy
+       sudo podman exec -it systemd-garden-ntfy ntfy user add --role=admin garden
+       sudo podman exec -it systemd-garden-ntfy ntfy token add garden
 
-  2. Edit /etc/gardyn/web.env — set GARDYN_BASE_URL, paste the ntfy token into
-     GARDYN_NTFY_TOKEN, and generate an agent token:
+  2. Edit /etc/garden/web.env — set GARDEN_BASE_URL, paste the ntfy token into
+     GARDEN_NTFY_TOKEN, and generate an agent token:
 
        openssl rand -hex 32
 
      Then:
 
-       sudo systemctl enable --now gardyn-web
-       sudo systemctl enable --now gardyn-backup.timer
+       sudo systemctl enable --now garden-web
+       sudo systemctl enable --now garden-backup.timer
 
-  Watch it come up with:  journalctl -u gardyn-web -f
+  Watch it come up with:  journalctl -u garden-web -f
   The first account to register at the web UI becomes the administrator.
 
 DONE

@@ -1,19 +1,19 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/gardyn-auth",
-    "crates/gardyn-cli",
-    "crates/gardyn-core",
-    "crates/gardyn-edge",
-    "crates/gardyn-guard",
-    "crates/gardyn-proto",
-    "crates/gardyn-hal",
-    "crates/gardyn-notify",
-    "crates/gardyn-rules",
-    "crates/gardyn-sim",
-    "crates/gardyn-store",
-    "crates/gardyn-vision",
-    "crates/gardyn-web",
+    "crates/garden-auth",
+    "crates/garden-cli",
+    "crates/garden-core",
+    "crates/garden-edge",
+    "crates/garden-guard",
+    "crates/garden-proto",
+    "crates/garden-hal",
+    "crates/garden-notify",
+    "crates/garden-rules",
+    "crates/garden-sim",
+    "crates/garden-store",
+    "crates/garden-vision",
+    "crates/garden-web",
 ]
 
 [workspace.package]
@@ -23,15 +23,15 @@ rust-version = "1.92"
 license = "MIT"
 
 [workspace.dependencies]
-gardyn-auth = { path = "crates/gardyn-auth" }
-gardyn-core = { path = "crates/gardyn-core" }
-gardyn-hal = { path = "crates/gardyn-hal" }
-gardyn-notify = { path = "crates/gardyn-notify" }
-gardyn-proto = { path = "crates/gardyn-proto" }
-gardyn-rules = { path = "crates/gardyn-rules" }
-gardyn-sim = { path = "crates/gardyn-sim" }
-gardyn-store = { path = "crates/gardyn-store" }
-gardyn-vision = { path = "crates/gardyn-vision" }
+garden-auth = { path = "crates/garden-auth" }
+garden-core = { path = "crates/garden-core" }
+garden-hal = { path = "crates/garden-hal" }
+garden-notify = { path = "crates/garden-notify" }
+garden-proto = { path = "crates/garden-proto" }
+garden-rules = { path = "crates/garden-rules" }
+garden-sim = { path = "crates/garden-sim" }
+garden-store = { path = "crates/garden-store" }
+garden-vision = { path = "crates/garden-vision" }
 tokio = { version = "1", features = ["full"] }
 
 jiff = { version = "0.2", features = ["serde"] }

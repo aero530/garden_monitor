@@ -10,7 +10,7 @@ between the garden and you.
 ```mermaid
 flowchart LR
   rules["rule engine<br/><small>every 5 min</small>"] --> task{{"outstanding task"}}
-  task --> policy["delivery policy<br/><small>gardyn-notify</small>"]
+  task --> policy["delivery policy<br/><small>garden-notify</small>"]
 
   policy -->|"info · advisory"| brief["morning brief<br/><small>08:00 local</small>"]
   policy -->|"quiet hours,<br/>below critical"| brief
@@ -96,8 +96,8 @@ rest of the deployment.
 ### 1. Config
 
 ```sh
-sudo mkdir -p /etc/gardyn-ntfy /var/lib/gardyn-ntfy/cache
-sudo tee /etc/gardyn-ntfy/server.yml >/dev/null <<'EOF'
+sudo mkdir -p /etc/garden-ntfy /var/lib/garden-ntfy/cache
+sudo tee /etc/garden-ntfy/server.yml >/dev/null <<'EOF'
 base-url: "http://ntfy.your-tailnet.ts.net"
 listen-http: ":8090"
 cache-file: "/var/cache/ntfy/cache.db"
@@ -119,22 +119,22 @@ EOF
 
 ### 2. Quadlet unit
 
-`/etc/containers/systemd/gardyn-ntfy.container`:
+`/etc/containers/systemd/garden-ntfy.container`:
 
 ```ini
 [Unit]
-Description=ntfy for Gardyn
+Description=ntfy for the garden
 After=network-online.target
 
 [Container]
 Image=docker.io/binwiederhier/ntfy:latest
 Exec=serve
 PublishPort=8090:8090
-Volume=/etc/gardyn-ntfy/server.yml:/etc/ntfy/server.yml:Z,ro
-Volume=/var/lib/gardyn-ntfy:/var/lib/ntfy:Z
-Volume=/var/lib/gardyn-ntfy/cache:/var/cache/ntfy:Z
+Volume=/etc/garden-ntfy/server.yml:/etc/ntfy/server.yml:Z,ro
+Volume=/var/lib/garden-ntfy:/var/lib/ntfy:Z
+Volume=/var/lib/garden-ntfy/cache:/var/cache/ntfy:Z
 # The brain reaches it by name on a shared Podman network.
-Network=gardyn.network
+Network=garden.network
 
 [Service]
 Restart=always
@@ -143,35 +143,35 @@ Restart=always
 WantedBy=multi-user.target
 ```
 
-`/etc/containers/systemd/gardyn.network`:
+`/etc/containers/systemd/garden.network`:
 
 ```ini
 [Unit]
-Description=Gardyn internal network
+Description=Garden internal network
 
 [Network]
-NetworkName=gardyn
+NetworkName=garden
 ```
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl start gardyn-ntfy
+sudo systemctl start garden-ntfy
 curl -s localhost:8090/v1/health      # {"healthy":true}
 ```
 
 ### 3. Create a user and a token
 
 ```sh
-sudo podman exec -it systemd-gardyn-ntfy ntfy user add --role=admin gardyn
-sudo podman exec -it systemd-gardyn-ntfy ntfy token add gardyn
-# tk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  — this is GARDYN_NTFY_TOKEN
+sudo podman exec -it systemd-garden-ntfy ntfy user add --role=admin garden
+sudo podman exec -it systemd-garden-ntfy ntfy token add garden
+# tk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  — this is GARDEN_NTFY_TOKEN
 ```
 
 Then a read-only user for the phone, so a stolen phone cannot publish:
 
 ```sh
-sudo podman exec -it systemd-gardyn-ntfy ntfy user add phone
-sudo podman exec -it systemd-gardyn-ntfy ntfy access phone 'gardyn-*' read-only
+sudo podman exec -it systemd-garden-ntfy ntfy user add phone
+sudo podman exec -it systemd-garden-ntfy ntfy access phone 'garden-*' read-only
 ```
 
 ### 4. Firewall
@@ -190,15 +190,15 @@ Do **not** open 8090 to the internet. Use Tailscale — see below.
 Add to the brain's environment file:
 
 ```sh
-GARDYN_NTFY_URL=http://gardyn-ntfy:8090     # container name on the shared network
-GARDYN_NTFY_TOKEN=tk_xxxxxxxxxxxxxxxxxxxx
+GARDEN_NTFY_URL=http://garden-ntfy:8090     # container name on the shared network
+GARDEN_NTFY_TOKEN=tk_xxxxxxxxxxxxxxxxxxxx
 # Must be how your phone reaches the brain, since the action buttons point here.
-GARDYN_BASE_URL=https://gardyn.your-tailnet.ts.net
+GARDEN_BASE_URL=https://garden.your-tailnet.ts.net
 ```
 
 ```sh
-sudo systemctl restart gardyn-web
-journalctl -u gardyn-web | grep -i notif
+sudo systemctl restart garden-web
+journalctl -u garden-web | grep -i notif
 ```
 
 With nothing configured the brain logs a warning at startup and the web UI says so on
@@ -215,7 +215,7 @@ exactly when you want it to work.
 ```sh
 sudo dnf install -y tailscale
 sudo systemctl enable --now tailscaled
-sudo tailscale up --advertise-tags=tag:gardyn
+sudo tailscale up --advertise-tags=tag:garden
 sudo tailscale serve --bg --https=443 http://localhost:8080     # the brain
 sudo tailscale serve --bg --https=8443 http://localhost:8090    # ntfy
 ```
@@ -223,11 +223,11 @@ sudo tailscale serve --bg --https=8443 http://localhost:8090    # ntfy
 Install Tailscale on your phone, then set:
 
 ```sh
-GARDYN_BASE_URL=https://gardyn.your-tailnet.ts.net
-# and drop GARDYN_INSECURE_COOKIES — Tailscale gives you real HTTPS.
+GARDEN_BASE_URL=https://garden.your-tailnet.ts.net
+# and drop GARDEN_INSECURE_COOKIES — Tailscale gives you real HTTPS.
 ```
 
-This is also what lets you drop `GARDYN_INSECURE_COOKIES`, which you should.
+This is also what lets you drop `GARDEN_INSECURE_COOKIES`, which you should.
 
 ---
 
@@ -237,17 +237,17 @@ This is also what lets you drop `GARDYN_INSECURE_COOKIES`, which you should.
    [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy) or F-Droid.
 2. Settings → **Default server** → your Tailscale ntfy URL.
 3. Sign in as the read-only `phone` user.
-4. **Subscribe to a topic.** Pick something unguessable — `gardyn-phil-8f3a2c`, not
-   `gardyn`. Anyone who knows the topic can publish to it.
-5. In the Gardyn web UI: **Account → Notification settings**, paste the same topic.
+4. **Subscribe to a topic.** Pick something unguessable — `garden-phil-8f3a2c`, not
+   `garden`. Anyone who knows the topic can publish to it.
+5. In the Garden web UI: **Account → Notification settings**, paste the same topic.
 6. Set your **UTC offset** — quiet hours are meaningless without it, and it is *your*
    offset, not the garden's. You might not live where it does.
 
 ### Test it
 
 ```sh
-curl -H "Authorization: Bearer $GARDYN_NTFY_TOKEN" \
-  -d '{"topic":"gardyn-phil-8f3a2c","title":"Test","message":"If you can read this, push works.","priority":4}' \
+curl -H "Authorization: Bearer $GARDEN_NTFY_TOKEN" \
+  -d '{"topic":"garden-phil-8f3a2c","title":"Test","message":"If you can read this, push works.","priority":4}' \
   http://localhost:8090
 ```
 
@@ -263,12 +263,12 @@ reputation by most large receivers whatever the message says. Point it at a rela
 already have.
 
 ```sh
-GARDYN_SMTP_HOST=smtp.example.com
-GARDYN_SMTP_PORT=587
-GARDYN_SMTP_USER=gardyn@example.com
-GARDYN_SMTP_PASSWORD=...
-GARDYN_SMTP_FROM=gardyn@example.com
-# GARDYN_SMTP_PLAINTEXT=1     # only for a relay on localhost or the same Podman network
+GARDEN_SMTP_HOST=smtp.example.com
+GARDEN_SMTP_PORT=587
+GARDEN_SMTP_USER=garden@example.com
+GARDEN_SMTP_PASSWORD=...
+GARDEN_SMTP_FROM=garden@example.com
+# GARDEN_SMTP_PLAINTEXT=1     # only for a relay on localhost or the same Podman network
 ```
 
 The envelope sender has to be something the relay will accept — that is the single
@@ -296,14 +296,14 @@ carries the whole outstanding list — including advisories that never push.
 
 | Variable | Default | |
 |---|---|---|
-| `GARDYN_NTFY_URL` | *unset* | unset means no push |
-| `GARDYN_NTFY_TOKEN` | *unset* | required if ntfy denies by default |
-| `GARDYN_SMTP_HOST` | *unset* | unset means no email |
-| `GARDYN_SMTP_PORT` | `587` | |
-| `GARDYN_SMTP_USER` / `_PASSWORD` | *unset* | omit for an unauthenticated relay |
-| `GARDYN_SMTP_FROM` | `gardyn@localhost` | must be acceptable to the relay |
-| `GARDYN_SMTP_PLAINTEXT` | *unset* | set to disable STARTTLS |
-| `GARDYN_BASE_URL` | `http://$GARDYN_BIND` | **must be reachable from your phone** |
+| `GARDEN_NTFY_URL` | *unset* | unset means no push |
+| `GARDEN_NTFY_TOKEN` | *unset* | required if ntfy denies by default |
+| `GARDEN_SMTP_HOST` | *unset* | unset means no email |
+| `GARDEN_SMTP_PORT` | `587` | |
+| `GARDEN_SMTP_USER` / `_PASSWORD` | *unset* | omit for an unauthenticated relay |
+| `GARDEN_SMTP_FROM` | `garden@localhost` | must be acceptable to the relay |
+| `GARDEN_SMTP_PLAINTEXT` | *unset* | set to disable STARTTLS |
+| `GARDEN_BASE_URL` | `http://$GARDEN_BIND` | **must be reachable from your phone** |
 
 The dispatcher sweeps every **5 minutes**. The daily brief goes out at **08:00 local**
 to each recipient.
@@ -317,10 +317,10 @@ configured`. Then check the settings page — it says plainly when the server ha
 channels.
 
 **The test curl works but real notifications do not.** The brain cannot reach ntfy.
-From the brain's container: `curl -v http://gardyn-ntfy:8090/v1/health`. If that fails,
+From the brain's container: `curl -v http://garden-ntfy:8090/v1/health`. If that fails,
 the two containers are not on the same Podman network.
 
-**Notifications arrive but the buttons do nothing.** `GARDYN_BASE_URL` is a URL your
+**Notifications arrive but the buttons do nothing.** `GARDEN_BASE_URL` is a URL your
 phone cannot resolve. It must be the Tailscale name, not `localhost` or a LAN IP you
 are not currently on.
 

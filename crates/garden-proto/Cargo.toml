@@ -1,0 +1,19 @@
+[package]
+name = "garden-proto"
+description = "Wire format shared between the edge agent and the brain."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+garden-core.workspace = true
+garden-hal.workspace = true
+jiff.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

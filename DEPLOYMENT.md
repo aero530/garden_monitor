@@ -18,18 +18,18 @@ firmware takeover — see [HARDWARE.md](HARDWARE.md). This document is only the 
 ```mermaid
 flowchart LR
   subgraph pi["Gardyn Studio 2 · Raspberry Pi"]
-    edge["gardyn-edge<br/><small>sensors, camera, spool</small>"]
-    guard["gardyn-guard<br/><small>failsafe supervisor</small>"]
+    edge["garden-edge<br/><small>sensors, camera, spool</small>"]
+    guard["garden-guard<br/><small>failsafe supervisor</small>"]
   end
 
   subgraph vm["Fedora 44 VM on Proxmox"]
     direction TB
-    subgraph net["podman network · gardyn"]
-      web["gardyn-web<br/><small>UI · rules · dispatcher</small>"]
+    subgraph net["podman network · garden"]
+      web["garden-web<br/><small>UI · rules · dispatcher</small>"]
       ntfy["ntfy<br/><small>push server</small>"]
       ollama["ollama<br/><small>optional · VisualDiagnosis</small>"]
     end
-    disk[("/var/lib/gardyn<br/><small>SQLite + frames</small>")]
+    disk[("/var/lib/garden<br/><small>SQLite + frames</small>")]
     ts["tailscaled<br/><small>on the host</small>"]
   end
 
@@ -98,7 +98,7 @@ Either the GUI or the command line; both produce the same thing.
 
 ```sh
 qm create 200 \
-  --name gardyn-brain \
+  --name garden-brain \
   --memory 4096 \
   --balloon 0 \
   --cores 2 \
@@ -125,7 +125,7 @@ Four of those flags matter more than the rest:
 | `--agent enabled=1` | Lets Proxmox quiesce and shut down the guest cleanly. Needs `qemu-guest-agent` inside, installed in 1.4. |
 | `--cpu host` | Passes through CPU features. Roughly doubles Rust build speed inside the VM, and matters a lot if you run Ollama. |
 
-**GUI equivalent:** Create VM → *General*: name `gardyn-brain`, tick **Start at boot** →
+**GUI equivalent:** Create VM → *General*: name `garden-brain`, tick **Start at boot** →
 *OS*: the Fedora ISO, type Linux 6.x → *System*: Machine `q35`, BIOS `OVMF (UEFI)`, tick
 **Qemu Agent**, SCSI Controller `VirtIO SCSI single` → *Disks*: 40 GB, **Discard** on,
 **SSD emulation** on → *CPU*: 2 cores, Type `host` → *Memory*: 4096, **Ballooning off**
@@ -143,7 +143,7 @@ Open the console (**>_ Console** in the GUI) and work through the installer:
   nothing. The Server default installs Cockpit and a handful of services you will not
   use. Minimal is easier to reason about.
 - **Installation Destination** → accept the automatic 40 GB layout.
-- **Network & Host Name** → set the hostname to `gardyn-brain`, and turn the interface
+- **Network & Host Name** → set the hostname to `garden-brain`, and turn the interface
   **on** — the installer leaves it off by default, which is the single most common way
   to finish an install with no network.
 - **Root Account** → leave root locked.
@@ -160,8 +160,8 @@ qm set 200 --ide2 none,media=cdrom
 From your workstation:
 
 ```sh
-ssh-copy-id you@gardyn-brain.local        # or the IP from the console
-ssh you@gardyn-brain.local
+ssh-copy-id you@garden-brain.local        # or the IP from the console
+ssh you@garden-brain.local
 ```
 
 Then, on the VM:
@@ -170,7 +170,7 @@ Then, on the VM:
 sudo dnf upgrade -y
 sudo dnf install -y qemu-guest-agent sqlite git
 sudo systemctl enable --now qemu-guest-agent
-sudo hostnamectl set-hostname gardyn-brain
+sudo hostnamectl set-hostname garden-brain
 
 # Timestamps in this system are stored UTC and rendered per person, so the host
 # zone only affects log readability. Set it anyway; reading journalctl in UTC at
@@ -211,13 +211,13 @@ qm snapshot 200 clean-fedora --description "Fedora 44 installed and updated, not
 
 ```sh
 sudo dnf install -y git
-git clone https://github.com/aero530/garden_monitor.git ~/gardyn
-cd ~/gardyn
+git clone https://github.com/aero530/garden_monitor.git ~/garden
+cd ~/garden
 ```
 
 You do **not** need Rust on the VM. The container image builds the code inside itself,
 so the toolchain lives in a build layer and is thrown away. (You *would* want Rust here
-to cross-compile `gardyn-edge` for the Pi — see HARDWARE.md.)
+to cross-compile `garden-edge` for the Pi — see HARDWARE.md.)
 
 ---
 
@@ -249,17 +249,17 @@ units in memory.
 
 ```mermaid
 flowchart LR
-  a["/etc/containers/systemd/<br/><b>gardyn-web.container</b>"]
+  a["/etc/containers/systemd/<br/><b>garden-web.container</b>"]
   b["systemctl daemon-reload<br/><small>runs the Quadlet generator</small>"]
-  c["gardyn-web.service<br/><small>generated, in memory</small>"]
+  c["garden-web.service<br/><small>generated, in memory</small>"]
   d["running container"]
-  a --> b --> c -- "systemctl start gardyn-web" --> d
+  a --> b --> c -- "systemctl start garden-web" --> d
 ```
 
 Three consequences that will save you time:
 
-1. **The unit is named after the file.** `gardyn-web.container` becomes
-   `gardyn-web.service`, which you manage as `systemctl start gardyn-web`.
+1. **The unit is named after the file.** `garden-web.container` becomes
+   `garden-web.service`, which you manage as `systemctl start garden-web`.
 2. **You never edit the generated unit.** Edit the `.container` file and
    `daemon-reload`.
 3. **`daemon-reload` is not optional.** Adding a `.container` file does nothing until
@@ -313,9 +313,9 @@ sudo ausearch -m AVC -ts recent
 
 ```sh
 sudo install -d -o 1000:1000 -m 0750 \
-  /var/lib/gardyn /var/lib/gardyn/db /var/lib/gardyn/frames /var/lib/gardyn/backups
-sudo install -d -o 1000:1000 -m 0750 /var/lib/gardyn-ntfy /var/cache/gardyn-ntfy
-sudo install -d -m 0750 /etc/gardyn
+  /var/lib/garden /var/lib/garden/db /var/lib/garden/frames /var/lib/garden/backups
+sudo install -d -o 1000:1000 -m 0750 /var/lib/garden-ntfy /var/cache/garden-ntfy
+sudo install -d -m 0750 /etc/garden
 ```
 
 `1000:1000` is deliberate. The containers run as uid 1000 rather than root, and with
@@ -327,18 +327,18 @@ error rather than a permissions one.
 
 | Path | Holds | Backed up |
 |---|---|---|
-| `/var/lib/gardyn/db/` | `gardyn.db` and its WAL | yes, nightly |
-| `/var/lib/gardyn/frames/` | camera images, one file each | **no** — see [Part 9](#part-9--backups) |
-| `/var/lib/gardyn/backups/` | nightly `.db.gz` snapshots | it *is* the backup |
-| `/var/lib/gardyn-ntfy/` | ntfy's user and token database | worth copying |
-| `/etc/gardyn/` | `web.env`, `ntfy-server.yml` | **yes — copy these somewhere safe** |
+| `/var/lib/garden/db/` | `garden.db` and its WAL | yes, nightly |
+| `/var/lib/garden/frames/` | camera images, one file each | **no** — see [Part 9](#part-9--backups) |
+| `/var/lib/garden/backups/` | nightly `.db.gz` snapshots | it *is* the backup |
+| `/var/lib/garden-ntfy/` | ntfy's user and token database | worth copying |
+| `/etc/garden/` | `web.env`, `ntfy-server.yml` | **yes — copy these somewhere safe** |
 
 ### Configuration files
 
 ```sh
-cd ~/gardyn
-sudo install -m 0600 deploy/web.env.example /etc/gardyn/web.env
-sudo install -m 0600 -o 1000:1000 deploy/ntfy-server.yml /etc/gardyn/ntfy-server.yml
+cd ~/garden
+sudo install -m 0600 deploy/web.env.example /etc/garden/web.env
+sudo install -m 0600 -o 1000:1000 deploy/ntfy-server.yml /etc/garden/ntfy-server.yml
 ```
 
 Both are commented in full. Leave them for now — you cannot finish `web.env` until
@@ -349,16 +349,16 @@ ntfy has issued a token, which happens in Part 6.
 ## Part 5 — build the brain image
 
 ```sh
-cd ~/gardyn
-sudo podman build -t localhost/gardyn-web:latest -f deploy/Containerfile .
+cd ~/garden
+sudo podman build -t localhost/garden-web:latest -f deploy/Containerfile .
 ```
 
 Five to fifteen minutes the first time, depending on the VM's cores; afterwards Podman
 caches the dependency layers and a rebuild is quick.
 
 ```sh
-sudo podman images | grep gardyn
-# localhost/gardyn-web  latest  a1b2c3d4  2 minutes ago  118 MB
+sudo podman images | grep garden
+# localhost/garden-web  latest  a1b2c3d4  2 minutes ago  118 MB
 ```
 
 The [Containerfile](deploy/Containerfile) is two stages: a Rust toolchain that compiles
@@ -370,10 +370,10 @@ is configured entirely from the environment — so the check is that the binary 
 and runnable:
 
 ```sh
-sudo podman run --rm --entrypoint /bin/sh localhost/gardyn-web:latest \
-  -c 'ls -l /usr/local/bin/gardyn-web && id'
-# -rwxr-xr-x 1 root root 24000000 ... /usr/local/bin/gardyn-web
-# uid=1000(gardyn) gid=1000(gardyn) groups=1000(gardyn)
+sudo podman run --rm --entrypoint /bin/sh localhost/garden-web:latest \
+  -c 'ls -l /usr/local/bin/garden-web && id'
+# -rwxr-xr-x 1 root root 24000000 ... /usr/local/bin/garden-web
+# uid=1000(garden) gid=1000(garden) groups=1000(garden)
 ```
 
 If `id` reports uid 0, the `USER` line in the Containerfile did not apply and the
@@ -389,22 +389,22 @@ Containers need to reach each other by name. A Podman network provides DNS for e
 that.
 
 ```sh
-cd ~/gardyn
+cd ~/garden
 sudo install -d -m 0755 /etc/containers/systemd
-sudo install -m 0644 deploy/quadlet/gardyn.network /etc/containers/systemd/
+sudo install -m 0644 deploy/quadlet/garden.network /etc/containers/systemd/
 sudo systemctl daemon-reload
 ```
 
-Quadlet turns `gardyn.network` into `gardyn-network.service`, which starts on demand —
+Quadlet turns `garden.network` into `garden-network.service`, which starts on demand —
 you do not start it yourself.
 
 ### 6.2 ntfy
 
 ```sh
-sudo install -m 0644 deploy/quadlet/gardyn-ntfy.container /etc/containers/systemd/
+sudo install -m 0644 deploy/quadlet/garden-ntfy.container /etc/containers/systemd/
 ```
 
-**Edit `/etc/gardyn/ntfy-server.yml` before starting it.** One line matters:
+**Edit `/etc/garden/ntfy-server.yml` before starting it.** One line matters:
 
 ```yaml
 base-url: "https://ntfy.your-tailnet.ts.net"
@@ -417,7 +417,7 @@ LAN address in for now — `http://192.168.1.20:8090` — and come back and chan
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl enable --now gardyn-ntfy
+sudo systemctl enable --now garden-ntfy
 curl -s localhost:8090/v1/health       # {"healthy":true}
 ```
 
@@ -426,58 +426,58 @@ until you do.
 
 ```sh
 # The publisher: this is the brain.
-sudo podman exec -it systemd-gardyn-ntfy ntfy user add --role=admin gardyn
-sudo podman exec -it systemd-gardyn-ntfy ntfy token add gardyn
+sudo podman exec -it systemd-garden-ntfy ntfy user add --role=admin garden
+sudo podman exec -it systemd-garden-ntfy ntfy token add garden
 # tk_xxxxxxxxxxxxxxxxxxxxxxxxxxxx   <- copy this
 ```
 
-> The container is named `systemd-gardyn-ntfy`. Quadlet prefixes `systemd-` to
+> The container is named `systemd-garden-ntfy`. Quadlet prefixes `systemd-` to
 > everything it creates. `sudo podman ps` if you ever lose track.
 
 Then a read-only account for the phone, so a stolen or compromised phone can read
 notifications but cannot send them:
 
 ```sh
-sudo podman exec -it systemd-gardyn-ntfy ntfy user add phone
-sudo podman exec -it systemd-gardyn-ntfy ntfy access phone 'gardyn-*' read-only
+sudo podman exec -it systemd-garden-ntfy ntfy user add phone
+sudo podman exec -it systemd-garden-ntfy ntfy access phone 'garden-*' read-only
 ```
 
 ### 6.3 The brain
 
-Fill in `/etc/gardyn/web.env` now:
+Fill in `/etc/garden/web.env` now:
 
 ```sh
-openssl rand -hex 32        # this is GARDYN_AGENT_TOKEN
-sudo nano /etc/gardyn/web.env
+openssl rand -hex 32        # this is GARDEN_AGENT_TOKEN
+sudo nano /etc/garden/web.env
 ```
 
 Three values to set:
 
 | | |
 |---|---|
-| `GARDYN_BASE_URL` | how your **phone** reaches the brain |
-| `GARDYN_AGENT_TOKEN` | the `openssl` output above; the Pi gets the same value |
-| `GARDYN_NTFY_TOKEN` | the `tk_…` from 6.2 |
+| `GARDEN_BASE_URL` | how your **phone** reaches the brain |
+| `GARDEN_AGENT_TOKEN` | the `openssl` output above; the Pi gets the same value |
+| `GARDEN_NTFY_TOKEN` | the `tk_…` from 6.2 |
 
 Then:
 
 ```sh
-cd ~/gardyn
-sudo install -m 0644 deploy/quadlet/gardyn-web.container /etc/containers/systemd/
+cd ~/garden
+sudo install -m 0644 deploy/quadlet/garden-web.container /etc/containers/systemd/
 sudo systemctl daemon-reload
-sudo systemctl enable --now gardyn-web
-journalctl -u gardyn-web -f
+sudo systemctl enable --now garden-web
+journalctl -u garden-web -f
 ```
 
 You are looking for:
 
 ```
-INFO gardyn_web: camera frames stored under /var/lib/gardyn/frames
-INFO gardyn_web: no accounts yet — the first to register becomes administrator
-INFO gardyn_web: listening on 0.0.0.0:8080 (base url https://gardyn.your-tailnet.ts.net)
+INFO garden_web: camera frames stored under /var/lib/garden/frames
+INFO garden_web: no accounts yet — the first to register becomes administrator
+INFO garden_web: listening on 0.0.0.0:8080 (base url https://garden.your-tailnet.ts.net)
 ```
 
-A `no notification channel configured` warning here means `GARDYN_NTFY_URL` is unset or
+A `no notification channel configured` warning here means `GARDEN_NTFY_URL` is unset or
 empty. The server runs fine; nothing reaches your phone.
 
 ### 6.4 Ollama — optional, skip it for now
@@ -487,13 +487,13 @@ what a plant looks like. It wants 8 GB of RAM to itself and everything else work
 without it.
 
 ```sh
-sudo install -m 0644 deploy/quadlet/gardyn-ollama.container /etc/containers/systemd/
+sudo install -m 0644 deploy/quadlet/garden-ollama.container /etc/containers/systemd/
 sudo systemctl daemon-reload
-sudo systemctl enable --now gardyn-ollama
-sudo podman exec -it systemd-gardyn-ollama ollama pull qwen2.5vl:7b
+sudo systemctl enable --now garden-ollama
+sudo podman exec -it systemd-garden-ollama ollama pull qwen2.5vl:7b
 ```
 
-The brain finds it at `http://gardyn-ollama:11434`. It is advisory only — deterministic
+The brain finds it at `http://garden-ollama:11434`. It is advisory only — deterministic
 rules own anything that touches dosing, water, or an actuator, so a model that invents a
 nutrient deficiency cannot act on it.
 
@@ -506,12 +506,12 @@ to the brain. On your home wifi they resolve. Anywhere else they do not — and 
 Done while you are out is precisely when you want it to work.
 
 Tailscale also gives you real HTTPS certificates, which is what lets you drop
-`GARDYN_INSECURE_COOKIES`.
+`GARDEN_INSECURE_COOKIES`.
 
 ```sh
 sudo dnf install -y tailscale
 sudo systemctl enable --now tailscaled
-sudo tailscale up --advertise-tags=tag:gardyn
+sudo tailscale up --advertise-tags=tag:garden
 ```
 
 Then publish the two services onto the tailnet:
@@ -526,14 +526,14 @@ Install Tailscale on your phone, sign in to the same tailnet, and update both co
 with the real names:
 
 ```sh
-# /etc/gardyn/web.env
-GARDYN_BASE_URL=https://gardyn-brain.your-tailnet.ts.net
-# and remove GARDYN_INSECURE_COOKIES if you had set it
+# /etc/garden/web.env
+GARDEN_BASE_URL=https://garden-brain.your-tailnet.ts.net
+# and remove GARDEN_INSECURE_COOKIES if you had set it
 
-# /etc/gardyn/ntfy-server.yml
-base-url: "https://gardyn-brain.your-tailnet.ts.net:8443"
+# /etc/garden/ntfy-server.yml
+base-url: "https://garden-brain.your-tailnet.ts.net:8443"
 
-sudo systemctl restart gardyn-ntfy gardyn-web
+sudo systemctl restart garden-ntfy garden-web
 ```
 
 **Do not port-forward 8080 from your router instead.** This system holds photographs of
@@ -559,7 +559,7 @@ working.
 
 ## Part 8 — first run
 
-Open `https://gardyn-brain.your-tailnet.ts.net` (or `http://192.168.1.20:8080` on the
+Open `https://garden-brain.your-tailnet.ts.net` (or `http://192.168.1.20:8080` on the
 LAN).
 
 1. **Register.** The first account becomes the server administrator. Registration then
@@ -568,7 +568,7 @@ LAN).
    to start collecting data.
 3. **Note the garden id** from the URL — the Pi needs it.
 4. **Account → Notification settings.** Set your ntfy topic to something unguessable
-   (`gardyn-phil-8f3a2c`, not `gardyn`; anyone who knows a topic can publish to it) and
+   (`garden-phil-8f3a2c`, not `garden`; anyone who knows a topic can publish to it) and
    set your **UTC offset**, or quiet hours will be computed in UTC and stay silent at
    the wrong times.
 5. **Subscribe on the phone.** ntfy app → Settings → Default server → your Tailscale
@@ -578,7 +578,7 @@ Test the whole chain:
 
 ```sh
 curl -H "Authorization: Bearer tk_xxxxxxxx" \
-  -d '{"topic":"gardyn-phil-8f3a2c","title":"Test","message":"Push works.","priority":4}' \
+  -d '{"topic":"garden-phil-8f3a2c","title":"Test","message":"Push works.","priority":4}' \
   http://localhost:8090
 ```
 
@@ -586,7 +586,7 @@ If that arrives on your phone but real notifications do not, the problem is in
 `web.env`, not in ntfy.
 
 Then point the Pi at it — [HARDWARE.md §1.2](HARDWARE.md) — using the same
-`GARDYN_AGENT_TOKEN` and the garden id from step 3.
+`GARDEN_AGENT_TOKEN` and the garden id from step 3.
 
 ### Snapshot again
 
@@ -599,17 +599,17 @@ qm snapshot 200 working --description "brain + ntfy running, tailscale up"
 ## Part 9 — backups
 
 ```sh
-cd ~/gardyn
-sudo install -m 0755 deploy/gardyn-backup /usr/local/bin/
-sudo install -m 0644 deploy/systemd/gardyn-backup.{service,timer} /etc/systemd/system/
+cd ~/garden
+sudo install -m 0755 deploy/garden-backup /usr/local/bin/
+sudo install -m 0644 deploy/systemd/garden-backup.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now gardyn-backup.timer
-sudo systemctl start gardyn-backup      # run once now
-ls -lh /var/lib/gardyn/backups/
+sudo systemctl enable --now garden-backup.timer
+sudo systemctl start garden-backup      # run once now
+ls -lh /var/lib/garden/backups/
 ```
 
 **Why not just snapshot the VM?** The database runs in WAL mode, so at any instant its
-real state is spread across `gardyn.db`, `gardyn.db-wal` and `gardyn.db-shm`. A
+real state is spread across `garden.db`, `garden.db-wal` and `garden.db-shm`. A
 filesystem snapshot — or a Proxmox snapshot of a live VM — can catch those three files
 mid-write. The result restores without complaining and is quietly missing recent data,
 which is the worst kind of broken backup. `VACUUM INTO` asks SQLite for a consistent
@@ -620,20 +620,20 @@ nightly `.db.gz` as the real backup and the snapshot as a convenience.
 
 **Camera frames are not backed up.** One frame an hour per garden is ~8,700 files a
 year, and they are the least valuable thing on the disk. If you want them, `rsync
-/var/lib/gardyn/frames/` somewhere on your own schedule.
+/var/lib/garden/frames/` somewhere on your own schedule.
 
-**Copy `/etc/gardyn/` off the machine.** It is not in any backup here and it holds your
+**Copy `/etc/garden/` off the machine.** It is not in any backup here and it holds your
 tokens.
 
 ### Restoring
 
 ```sh
-sudo systemctl stop gardyn-web
-sudo gunzip -c /var/lib/gardyn/backups/gardyn-20260726T033000Z.db.gz \
-  | sudo tee /var/lib/gardyn/db/gardyn.db >/dev/null
-sudo rm -f /var/lib/gardyn/db/gardyn.db-wal /var/lib/gardyn/db/gardyn.db-shm
-sudo chown 1000:1000 /var/lib/gardyn/db/gardyn.db
-sudo systemctl start gardyn-web
+sudo systemctl stop garden-web
+sudo gunzip -c /var/lib/garden/backups/garden-20260726T033000Z.db.gz \
+  | sudo tee /var/lib/garden/db/garden.db >/dev/null
+sudo rm -f /var/lib/garden/db/garden.db-wal /var/lib/garden/db/garden.db-shm
+sudo chown 1000:1000 /var/lib/garden/db/garden.db
+sudo systemctl start garden-web
 ```
 
 Deleting the stale `-wal` and `-shm` matters: leaving them next to a restored database
@@ -646,24 +646,24 @@ lets SQLite replay a journal belonging to a different file.
 ### The brain
 
 ```sh
-cd ~/gardyn
+cd ~/garden
 git pull
-sudo podman build -t localhost/gardyn-web:latest -f deploy/Containerfile .
-sudo systemctl restart gardyn-web
+sudo podman build -t localhost/garden-web:latest -f deploy/Containerfile .
+sudo systemctl restart garden-web
 ```
 
 Schema migrations run at startup and are idempotent. Take a backup first anyway:
-`sudo systemctl start gardyn-backup`.
+`sudo systemctl start garden-backup`.
 
 ### ntfy
 
-`gardyn-ntfy.container` sets `AutoUpdate=registry`, so:
+`garden-ntfy.container` sets `AutoUpdate=registry`, so:
 
 ```sh
 sudo systemctl enable --now podman-auto-update.timer
 ```
 
-...pulls new `v2.x` releases weekly and restarts the container. `gardyn-web` is
+...pulls new `v2.x` releases weekly and restarts the container. `garden-web` is
 deliberately **not** auto-updated — it is built locally from a commit you chose.
 
 ### Fedora
@@ -682,48 +682,48 @@ Snapshot before a major release upgrade. `--onboot 1` brings everything back by 
 
 | Unit | Container | Port | Purpose |
 |---|---|---|---|
-| `gardyn-web` | `systemd-gardyn-web` | 8080 | UI, rules, agent API, dispatcher |
-| `gardyn-ntfy` | `systemd-gardyn-ntfy` | 8090 | push |
-| `gardyn-ollama` | `systemd-gardyn-ollama` | — | optional, network-internal only |
-| `gardyn-backup.timer` | — | — | nightly 03:30 |
+| `garden-web` | `systemd-garden-web` | 8080 | UI, rules, agent API, dispatcher |
+| `garden-ntfy` | `systemd-garden-ntfy` | 8090 | push |
+| `garden-ollama` | `systemd-garden-ollama` | — | optional, network-internal only |
+| `garden-backup.timer` | — | — | nightly 03:30 |
 | `tailscaled` | — | — | remote access |
 
 ### Commands you will actually use
 
 ```sh
-sudo systemctl status gardyn-web           # is it up
-journalctl -u gardyn-web -f                # follow the log
-journalctl -u gardyn-web --since "1 hour ago" -p warning
-sudo systemctl restart gardyn-web          # after editing web.env
+sudo systemctl status garden-web           # is it up
+journalctl -u garden-web -f                # follow the log
+journalctl -u garden-web --since "1 hour ago" -p warning
+sudo systemctl restart garden-web          # after editing web.env
 sudo systemctl daemon-reload               # after editing a .container file
 sudo podman ps                             # what is running
-sudo podman exec -it systemd-gardyn-web sh # a shell inside the brain
+sudo podman exec -it systemd-garden-web sh # a shell inside the brain
 /usr/libexec/podman/quadlet -dryrun        # what Quadlet made of your files
 ```
 
 ### Everything the installer does
 
 [`deploy/install.sh`](deploy/install.sh) performs Parts 4, 5, 6 and 9 in one pass, and
-will not overwrite `/etc/gardyn/web.env` or `ntfy-server.yml` if they already exist.
+will not overwrite `/etc/garden/web.env` or `ntfy-server.yml` if they already exist.
 
 ```sh
-cd ~/gardyn && sudo ./deploy/install.sh
+cd ~/garden && sudo ./deploy/install.sh
 ```
 
 ---
 
 ## Troubleshooting
 
-**`Unit gardyn-web.service not found`.** The `.container` file is not where Quadlet
+**`Unit garden-web.service not found`.** The `.container` file is not where Quadlet
 looks, or you have not reloaded. Check `ls /etc/containers/systemd/`, then
 `sudo systemctl daemon-reload`, then `/usr/libexec/podman/quadlet -dryrun` to see the
 parse result.
 
-**Container starts, then exits immediately.** `journalctl -u gardyn-web -n 50`. The
-usual cause is `/etc/gardyn/web.env` missing or unreadable — systemd treats a missing
+**Container starts, then exits immediately.** `journalctl -u garden-web -n 50`. The
+usual cause is `/etc/garden/web.env` missing or unreadable — systemd treats a missing
 `EnvironmentFile` as fatal.
 
-**Permission denied on `/var/lib/gardyn` with correct-looking permissions.** SELinux.
+**Permission denied on `/var/lib/garden` with correct-looking permissions.** SELinux.
 Confirm with `sudo ausearch -m AVC -ts recent`; the fix is the `:Z` on the volume line,
 not `chmod 777`.
 
@@ -732,23 +732,23 @@ not `chmod 777`.
 
 **Web UI loads but sign-in bounces back to the login page.** Session cookies use the
 `__Host-` prefix, which browsers refuse over plain HTTP. Use the Tailscale HTTPS name,
-or set `GARDYN_INSECURE_COOKIES=1` as a temporary measure.
+or set `GARDEN_INSECURE_COOKIES=1` as a temporary measure.
 
 **Push works from `curl` but not from the brain.** The brain cannot reach ntfy:
 
 ```sh
-sudo podman exec -it systemd-gardyn-web sh -c 'wget -qO- http://gardyn-ntfy:8090/v1/health'
+sudo podman exec -it systemd-garden-web sh -c 'wget -qO- http://garden-ntfy:8090/v1/health'
 ```
 
 If that fails, the two containers are not on the same network. Check both `.container`
-files have `Network=gardyn.network`.
+files have `Network=garden.network`.
 
-**Notifications arrive; the buttons do nothing.** `GARDYN_BASE_URL` is a name your phone
+**Notifications arrive; the buttons do nothing.** `GARDEN_BASE_URL` is a name your phone
 cannot resolve. It must be the Tailscale name, not `localhost` and not a LAN IP you are
 not currently on.
 
-**The Pi gets 401.** `GARDYN_AGENT_TOKEN` differs between `/etc/gardyn/web.env` and the
-Pi's `/etc/gardyn/edge.env`.
+**The Pi gets 401.** `GARDEN_AGENT_TOKEN` differs between `/etc/garden/web.env` and the
+Pi's `/etc/garden/edge.env`.
 
 **The Pi gets 404.** Wrong garden id, or the garden was deleted.
 
@@ -759,10 +759,10 @@ the morning brief. See [NOTIFICATIONS.md](NOTIFICATIONS.md).
 **Disk filling up.** Almost certainly camera frames:
 
 ```sh
-du -sh /var/lib/gardyn/frames/*
+du -sh /var/lib/garden/frames/*
 ```
 
-Lower the capture rate on the Pi with `GARDYN_FRAME_SECONDS`, or `0` to stop capturing.
+Lower the capture rate on the Pi with `GARDEN_FRAME_SECONDS`, or `0` to stop capturing.
 
 ---
 
@@ -770,7 +770,7 @@ Lower the capture rate on the Pi with `GARDYN_FRAME_SECONDS`, or `0` to stop cap
 
 Stated plainly so you do not go looking:
 
-- **No off-site backups.** `/var/lib/gardyn/backups` is on the same disk as the
+- **No off-site backups.** `/var/lib/garden/backups` is on the same disk as the
   database. Copy it somewhere else.
 - **No HA, no clustering.** One VM. If it is down you get no notifications — but the
   garden keeps running on the Pi's resident schedule.

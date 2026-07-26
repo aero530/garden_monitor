@@ -1,0 +1,15 @@
+[package]
+name = "garden-sim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+garden-core.workspace = true
+garden-hal.workspace = true
+garden-rules.workspace = true
+jiff.workspace = true
+
+[lints]
+workspace = true
