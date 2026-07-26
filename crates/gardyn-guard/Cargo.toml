@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 gardyn-hal.workspace = true
+thiserror.workspace = true
 jiff.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"

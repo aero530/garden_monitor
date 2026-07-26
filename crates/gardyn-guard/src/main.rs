@@ -9,28 +9,17 @@
 //! has no HTTP client, no database, no async runtime, and no rules engine. It reads a
 //! file's mtime and drives two pins.
 //!
-//! **Not wired to real hardware yet**, because nothing owns the pins until Phase 6.
-//! Until then it runs, watches, and logs what it *would* do, which is exactly what you
-//! want while proving the watchdog before trusting it with a crop.
+//! **Dry-run by default**, because until Phase 6 the factory firmware owns the pins
+//! and two processes fighting over a PWM line is how you lose a crop. In dry-run it
+//! still runs the whole loop and logs what it would have driven, which is what the
+//! weeks of watching before you trust a watchdog actually look like.
+
+mod pins;
 
 use clap::Parser;
-use gardyn_hal::Duty;
+use gardyn_hal::{GuardMarker, Heartbeat, Schedule, Setpoint};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
-
-/// Light hours per day the failsafe runs.
-///
-/// Chosen to be adequate for everything in Gardyn's catalogue rather than optimal for
-/// anything. A failsafe should keep plants alive until someone notices, not grow them
-/// well.
-const FAILSAFE_LIGHT_HOURS: f64 = 14.0;
-/// Pump: minutes on, then off, repeating.
-const FAILSAFE_PUMP_ON_MINUTES: f64 = 15.0;
-const FAILSAFE_PUMP_CYCLE_MINUTES: f64 = 60.0;
-/// Duty while the pump runs. Well under the 30% ceiling the supply can take.
-const FAILSAFE_PUMP_DUTY: f32 = 0.25;
-/// Light duty while on.
-const FAILSAFE_LIGHT_DUTY: f32 = 0.80;
 
 #[derive(Parser)]
 #[command(name = "gardyn-guard", version, about = "Gardyn failsafe supervisor")]
@@ -53,46 +42,26 @@ struct Cli {
     /// Log what would happen without touching any pin. Default until Phase 6.
     #[arg(long, env = "GARDYN_GUARD_DRY_RUN", default_value_t = true)]
     dry_run: bool,
+
+    /// The file this writes to tell the agent it has taken the pins.
+    ///
+    /// The agent watches it and stands down. Without this the two would drive the same
+    /// line whenever a slow tick made the agent look briefly dead.
+    #[arg(
+        long,
+        env = "GARDYN_GUARD_MARKER",
+        default_value = "/run/gardyn/guard.engaged"
+    )]
+    marker: PathBuf,
 }
 
-/// What the failsafe schedule wants at a given moment.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Setpoint {
-    light: Duty,
-    pump: Duty,
-}
-
-/// The conservative schedule, as a pure function of elapsed time.
+/// The conservative schedule at a given moment.
 ///
-/// Takes seconds-since-midnight rather than a clock so it is trivially testable, and
-/// so a wrong timezone cannot make the lights come on at 3am.
+/// Takes seconds-since-midnight rather than a clock so the whole day is trivially
+/// testable, and so a wrong timezone cannot make the lights come on at 3am without a
+/// test noticing.
 fn failsafe_setpoint(seconds_since_midnight: u64) -> Setpoint {
-    let hour = (seconds_since_midnight as f64) / 3600.0;
-    let light = if hour < FAILSAFE_LIGHT_HOURS {
-        Duty::new(FAILSAFE_LIGHT_DUTY)
-    } else {
-        Duty::OFF
-    };
-
-    let minute_in_cycle = ((seconds_since_midnight as f64) / 60.0) % FAILSAFE_PUMP_CYCLE_MINUTES;
-    let pump = if minute_in_cycle < FAILSAFE_PUMP_ON_MINUTES {
-        // `Duty::pump` clamps to the current ceiling regardless of what is asked for,
-        // which is the invariant that protects the supply.
-        Duty::pump(FAILSAFE_PUMP_DUTY)
-    } else {
-        Duty::OFF
-    };
-
-    Setpoint { light, pump }
-}
-
-/// Seconds since the heartbeat file was last touched.
-///
-/// A missing file counts as infinitely stale: if the agent has never run, the garden
-/// still needs light and water.
-fn heartbeat_age(path: &PathBuf) -> Option<Duration> {
-    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-    SystemTime::now().duration_since(modified).ok()
+    Schedule::FAILSAFE.setpoint((seconds_since_midnight % 86_400) as u32)
 }
 
 fn main() {
@@ -106,24 +75,35 @@ fn main() {
     let cli = Cli::parse();
     let grace = Duration::from_secs(cli.grace_seconds);
     let interval = Duration::from_secs(cli.interval_seconds.max(1));
+    let heartbeat = Heartbeat::new(&cli.heartbeat);
+    let marker = GuardMarker::new(&cli.marker);
+    let mut output = pins::Output::open(cli.dry_run);
 
     tracing::info!(
-        heartbeat = %cli.heartbeat.display(),
+        heartbeat = %heartbeat.path().display(),
+        marker = %marker.path().display(),
         grace_seconds = cli.grace_seconds,
-        dry_run = cli.dry_run,
+        live = output.is_live(),
         "failsafe supervisor started"
     );
-    if cli.dry_run {
+    if !output.is_live() {
         tracing::info!(
             "dry run: the guard will log what it would do but will not touch a pin. \
              Clear GARDYN_GUARD_DRY_RUN only after Phase 6."
         );
     }
 
+    // A marker left behind by a crashed guard would keep the agent standing down for
+    // ever, so the pins are explicitly disowned at start-up. Safe because we have not
+    // engaged yet: whatever is driving them now keeps driving them.
+    if let Err(e) = marker.release() {
+        tracing::warn!(%e, "could not clear a stale marker");
+    }
+
     let mut engaged = false;
     loop {
-        let age = heartbeat_age(&cli.heartbeat);
-        let stale = age.map(|a| a > grace).unwrap_or(true);
+        let age = heartbeat.age();
+        let stale = heartbeat.is_stale(grace);
 
         if stale && !engaged {
             engaged = true;
@@ -131,9 +111,20 @@ fn main() {
                 age_seconds = age.map(|a| a.as_secs()),
                 "edge agent is not beating — engaging the failsafe schedule"
             );
+            // Claimed *before* the first write, so the agent has already stood down by
+            // the time we touch a pin.
+            if let Err(e) = marker.engage() {
+                tracing::error!(%e, "could not claim the pins; the agent may still be driving");
+            }
         } else if !stale && engaged {
             engaged = false;
             tracing::info!("edge agent is back — standing down");
+            // Pump off first, then release: the reverse order would let the agent
+            // resume while the failsafe still had the pump running.
+            output.release_pump();
+            if let Err(e) = marker.release() {
+                tracing::error!(%e, "could not release the pins");
+            }
         }
 
         if engaged {
@@ -141,18 +132,7 @@ fn main() {
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs() % 86_400)
                 .unwrap_or(0);
-            let setpoint = failsafe_setpoint(seconds);
-            if cli.dry_run {
-                tracing::info!(
-                    light = setpoint.light.percent(),
-                    pump = setpoint.pump.percent(),
-                    "would drive"
-                );
-            } else {
-                // Phase 6 wires this to rppal. Until the takeover happens the factory
-                // firmware owns the pins and writing to them would be a fight.
-                tracing::warn!("actuator control is not implemented until Phase 6");
-            }
+            output.drive(failsafe_setpoint(seconds));
         }
 
         std::thread::sleep(interval);
@@ -162,6 +142,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gardyn_hal::Duty;
 
     const HOUR: u64 = 3600;
 
@@ -213,26 +194,38 @@ mod tests {
         }
     }
 
+    /// Heartbeat staleness itself is covered in `gardyn_hal::handover`, which both
+    /// processes share. What matters here is the transition it drives.
     #[test]
-    fn a_missing_heartbeat_file_counts_as_stale() {
-        // The case that matters most: the agent has never started, and the garden
-        // still needs light and water.
-        let absent = PathBuf::from("/definitely/not/a/real/heartbeat");
-        assert!(heartbeat_age(&absent).is_none());
-    }
-
-    #[test]
-    fn a_fresh_heartbeat_file_is_not_stale() {
+    fn the_marker_is_claimed_before_the_first_write_and_released_after_the_last() {
+        // Ordering is the safety property: claim, then drive; stop the pump, then
+        // release. Either reversed leaves a window where both processes own a pin.
         let path = std::env::temp_dir().join(format!(
-            "gardyn-guard-test-{}",
+            "gardyn-guard-handover-{}",
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
-        std::fs::write(&path, b"beat").unwrap();
-        let age = heartbeat_age(&path).expect("a file we just wrote has an mtime");
-        assert!(age < Duration::from_secs(5));
+        let marker = GuardMarker::new(&path);
+        let heartbeat = Heartbeat::new(path.with_extension("beat"));
+
+        // Nothing has ever beaten, so the agent is presumed dead.
+        assert!(heartbeat.is_stale(Duration::from_secs(300)));
+        marker.engage().unwrap();
+        assert!(marker.engaged(), "the agent must see this before we drive");
+
+        let mut output = pins::Output::open(false);
+        output.drive(failsafe_setpoint(6 * 3600));
+
+        // The agent comes back.
+        heartbeat.touch("0.1.0").unwrap();
+        assert!(!heartbeat.is_stale(Duration::from_secs(300)));
+        output.release_pump();
+        marker.release().unwrap();
+        assert!(!marker.engaged());
+
         let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("beat"));
     }
 }

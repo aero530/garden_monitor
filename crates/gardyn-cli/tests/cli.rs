@@ -321,3 +321,60 @@ fn a_malformed_sample_says_what_the_format_is() {
     assert!(!output.status.success());
     assert!(stderr.contains("distance_mm:volume_l"), "{stderr}");
 }
+
+#[tokio::test]
+async fn the_schedule_can_be_set_previewed_and_cleared() {
+    let f = fixture("schedule").await;
+    let garden = f.garden.to_string();
+
+    let empty = run(&f, &["schedule", "show", "--garden", &garden]);
+    assert!(empty.contains("no schedule set"), "{empty}");
+    // Clearing must never read as "turn the lights off".
+    assert!(empty.contains("does not mean dark"), "{empty}");
+
+    let set = run(
+        &f,
+        &[
+            "schedule", "set", "--garden", &garden, "--hours", "14", "--duty", "0.8",
+        ],
+    );
+    assert!(set.contains("14.0 h at 80%"), "{set}");
+    assert!(set.contains("--own-actuators"), "must say it is inert: {set}");
+
+    let shown = run(&f, &["schedule", "show", "--garden", &garden]);
+    assert!(shown.contains("14.0 h at 80%"), "{shown}");
+
+    // Changing it reports the change in daily light, not just the new hours.
+    let changed = run(
+        &f,
+        &[
+            "schedule", "set", "--garden", &garden, "--hours", "10", "--duty", "0.8",
+        ],
+    );
+    assert!(changed.contains("daily light"), "{changed}");
+
+    let preview = run(&f, &["schedule", "preview", "--garden", &garden]);
+    assert!(preview.contains("hour   light   pump"), "{preview}");
+    assert_eq!(preview.lines().count(), 25, "a header and 24 hours");
+
+    run(&f, &["schedule", "clear", "--garden", &garden]);
+    assert!(run(&f, &["schedule", "show", "--garden", &garden]).contains("no schedule set"));
+}
+
+#[tokio::test]
+async fn a_schedule_that_would_overload_the_supply_is_refused() {
+    // The pump ceiling, enforced at the point a person could type past it.
+    let f = fixture("overload").await;
+    let err = run_failing(
+        &f,
+        &[
+            "schedule",
+            "set",
+            "--garden",
+            &f.garden.to_string(),
+            "--pump-duty",
+            "0.9",
+        ],
+    );
+    assert!(err.contains("ceiling"), "{err}");
+}

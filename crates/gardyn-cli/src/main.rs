@@ -13,6 +13,7 @@ mod replay;
 
 use clap::{Args, Parser, Subcommand};
 use gardyn_core::{GardenId, TankEvent, TankGeometry, Timestamp, time::add_days};
+use gardyn_hal::Schedule;
 use gardyn_store::Store;
 use gardyn_vision::roi::RoiMap;
 use std::path::{Path, PathBuf};
@@ -54,6 +55,10 @@ enum Command {
     /// the task comes straight back.
     #[command(subcommand)]
     Log(LogCommand),
+
+    /// The light and pump programme the Pi runs. **Phase 6.**
+    #[command(subcommand)]
+    Schedule(ScheduleCommand),
 
     /// Replay stored history against the current rule set.
     Replay(ReplayArgs),
@@ -140,6 +145,51 @@ enum VisionCommand {
         frame: PathBuf,
     },
     /// Turn vision off by forgetting where the slots are.
+    Clear {
+        #[arg(long)]
+        garden: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ScheduleCommand {
+    /// Show what the garden is being told to run.
+    Show {
+        #[arg(long)]
+        garden: String,
+    },
+    /// Set the programme. Takes effect on the agent's next telemetry call.
+    Set {
+        #[arg(long)]
+        garden: String,
+        /// Local hour the lights start ramping up.
+        #[arg(long, default_value_t = 6)]
+        start_hour: u8,
+        /// Hours of light per day, ramps included.
+        #[arg(long, default_value_t = 16.0)]
+        hours: f32,
+        /// Duty at full daylight, 0.0 to 1.0.
+        #[arg(long, default_value_t = 0.85)]
+        duty: f32,
+        /// Minutes spent ramping at dawn and at dusk.
+        #[arg(long, default_value_t = 30.0)]
+        ramp: f32,
+        /// Minutes the pump runs at the start of each cycle.
+        #[arg(long, default_value_t = 15.0)]
+        pump_on: f32,
+        /// Length of one pump cycle, in minutes.
+        #[arg(long, default_value_t = 60.0)]
+        pump_cycle: f32,
+        /// Pump duty. Capped at 0.30 whatever is asked for.
+        #[arg(long, default_value_t = 0.25)]
+        pump_duty: f32,
+    },
+    /// Print the whole day, hour by hour, without changing anything.
+    Preview {
+        #[arg(long)]
+        garden: String,
+    },
+    /// Stop sending a schedule. The agent keeps running whatever it last received.
     Clear {
         #[arg(long)]
         garden: String,
@@ -268,6 +318,7 @@ async fn run() -> Fallible {
         Command::Tank(TankCommand::Calibrate { .. }) => unreachable!("handled above"),
         Command::Vision(command) => vision_online(&store, command).await,
         Command::Log(command) => log(&store, command).await,
+        Command::Schedule(command) => schedule(&store, command).await,
         Command::Replay(args) => replay_cmd(&store, args).await,
         Command::Backup { out } => {
             let path = out.to_string_lossy().to_string();
@@ -601,6 +652,96 @@ async fn log(store: &Store, command: LogCommand) -> Fallible {
         tank.litres_added_since_food_dose
     );
     Ok(())
+}
+
+// --- Schedule ---------------------------------------------------------------------------
+
+async fn schedule(store: &Store, command: ScheduleCommand) -> Fallible {
+    match command {
+        ScheduleCommand::Show { garden } => {
+            let id = parse_garden(&garden)?;
+            match store.schedule(id).await? {
+                Some(s) => print_schedule(&s),
+                None => println!(
+                    "no schedule set — the agent runs whatever it last received, or its\n                     own default if it has never been told. Clearing does not mean dark."
+                ),
+            }
+            Ok(())
+        }
+        ScheduleCommand::Set {
+            garden,
+            start_hour,
+            hours,
+            duty,
+            ramp,
+            pump_on,
+            pump_cycle,
+            pump_duty,
+        } => {
+            let id = parse_garden(&garden)?;
+            let wanted = Schedule {
+                light_start_hour: start_hour,
+                light_hours: hours,
+                light_duty: duty,
+                ramp_minutes: ramp,
+                pump_on_minutes: pump_on,
+                pump_cycle_minutes: pump_cycle,
+                pump_duty,
+            };
+            wanted.validate()?;
+
+            if let Some(current) = store.schedule(id).await? {
+                let before = current.daily_duty_hours();
+                let after = wanted.daily_duty_hours();
+                println!(
+                    "daily light {before:.1} → {after:.1} duty-hours ({:+.0}%)\n",
+                    if before > 0.0 {
+                        (after - before) / before * 100.0
+                    } else {
+                        0.0
+                    }
+                );
+            }
+
+            store.set_schedule(id, &wanted, Timestamp::now()).await?;
+            print_schedule(&wanted);
+            println!("\nThe agent picks this up on its next telemetry call. It only acts on it");
+            println!("if it was started with --own-actuators.");
+            Ok(())
+        }
+        ScheduleCommand::Preview { garden } => {
+            let id = parse_garden(&garden)?;
+            let s = store.schedule(id).await?.unwrap_or(Schedule::DEFAULT);
+            println!("hour   light   pump");
+            for hour in 0..24 {
+                let point = s.setpoint(hour * 3600);
+                println!(
+                    "{hour:>4}   {:>5.0}%  {:>5.0}%",
+                    point.light.percent(),
+                    point.pump.percent()
+                );
+            }
+            Ok(())
+        }
+        ScheduleCommand::Clear { garden } => {
+            let id = parse_garden(&garden)?;
+            store.clear_schedule(id).await?;
+            println!("cleared; the agent keeps running whatever it last received");
+            Ok(())
+        }
+    }
+}
+
+fn print_schedule(s: &Schedule) {
+    println!("    lights         {:02}:00 for {:.1} h at {:.0}%", s.light_start_hour, s.light_hours, s.light_duty * 100.0);
+    println!("    ramp           {:.0} min at each end", s.ramp_minutes);
+    println!(
+        "    pump           {:.0} min in every {:.0} at {:.0}%",
+        s.pump_on_minutes,
+        s.pump_cycle_minutes,
+        s.pump_duty * 100.0
+    );
+    println!("    daily light    {:.1} duty-hours", s.daily_duty_hours());
 }
 
 // --- Replay -----------------------------------------------------------------------------

@@ -41,6 +41,21 @@ CREATE TABLE IF NOT EXISTS gardens (
     created_at TEXT NOT NULL
 );
 
+-- The light and pump programme the Pi should be running, as a `gardyn_hal::Schedule`.
+--
+-- Handed to the agent on its next telemetry response, never pushed. The agent runs it
+-- from its own clock and keeps running it when the brain is unreachable, which is the
+-- load-bearing rule of the whole design: the brain is not in the control loop.
+--
+-- Absent means "no opinion", which the agent reads as "keep what you have". It never
+-- means "stop", because a brain that has forgotten a garden must not be able to turn
+-- its lights off.
+CREATE TABLE IF NOT EXISTS garden_schedule (
+    garden_id  TEXT PRIMARY KEY REFERENCES gardens(id) ON DELETE CASCADE,
+    schedule   TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Sharing lives entirely in this table. A garden is shared exactly when it has more
 -- than one row here; un-sharing is a delete. ON DELETE CASCADE means removing a user
 -- or a garden cannot leave an orphaned grant behind.

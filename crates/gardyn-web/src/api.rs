@@ -73,7 +73,16 @@ async fn telemetry(
         .map(|c| c.label().to_string())
         .collect();
 
-    Ok(Json(gardyn_proto::TelemetryAccepted { capabilities }))
+    // The schedule rides back on the response the agent already asked for. No second
+    // endpoint, no inbound connection for a firewall to allow, and an agent that
+    // cannot reach us simply keeps the one it has — which is the required behaviour
+    // rather than a fallback.
+    let schedule = state.store.schedule(garden).await?;
+
+    Ok(Json(gardyn_proto::TelemetryAccepted {
+        capabilities,
+        schedule,
+    }))
 }
 
 /// Constant-time-ish bearer check.

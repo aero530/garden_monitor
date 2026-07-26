@@ -6,6 +6,12 @@
 //! with no Pi in the loop — most of the work in this project is not hardware work and
 //! should not be gated on hardware.
 
+pub mod handover;
+pub mod schedule;
+
+pub use handover::{GuardMarker, Heartbeat};
+pub use schedule::{Schedule, ScheduleError, Setpoint};
+
 use gardyn_core::{CapabilitySet, SensorSnapshot};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};

@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 gardyn-core.workspace = true
+gardyn-hal.workspace = true
 jiff.workspace = true
 serde.workspace = true
 

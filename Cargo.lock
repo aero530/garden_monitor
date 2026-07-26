@@ -662,6 +662,7 @@ dependencies = [
  "clap",
  "gardyn-auth",
  "gardyn-core",
+ "gardyn-hal",
  "gardyn-rules",
  "gardyn-store",
  "gardyn-vision",
@@ -711,6 +712,7 @@ dependencies = [
  "gardyn-hal",
  "jiff",
  "rppal",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
 ]
@@ -722,6 +724,7 @@ dependencies = [
  "gardyn-core",
  "jiff",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -744,6 +747,7 @@ name = "gardyn-proto"
 version = "0.1.0"
 dependencies = [
  "gardyn-core",
+ "gardyn-hal",
  "jiff",
  "serde",
  "serde_json",
@@ -773,6 +777,7 @@ version = "0.1.0"
 dependencies = [
  "gardyn-auth",
  "gardyn-core",
+ "gardyn-hal",
  "gardyn-notify",
  "gardyn-rules",
  "jiff",

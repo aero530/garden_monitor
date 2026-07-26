@@ -12,6 +12,7 @@
 use crate::{Result, Store, StoreError, ts};
 use gardyn_auth::UserId;
 use gardyn_core::{GardenId, TankEvent, TankGeometry, TankState};
+use gardyn_hal::Schedule;
 use jiff::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
@@ -118,20 +119,16 @@ impl Store {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use gardyn_auth::EmailAddress;
-    use gardyn_core::{DeviceModel, TaskKind, time::add_days};
+mod tests_support {
+    pub use super::*;
+    pub use gardyn_auth::EmailAddress;
+    pub use gardyn_core::{DeviceModel, TaskKind, time::add_days};
 
-    fn t0() -> Timestamp {
+    pub fn t0() -> Timestamp {
         Timestamp::from_second(1_700_000_000).unwrap()
     }
 
-    fn geometry() -> TankGeometry {
-        TankGeometry::STUDIO_2
-    }
-
-    async fn fixture() -> (Store, GardenId, UserId) {
+    pub async fn fixture() -> (Store, GardenId, UserId) {
         let store = Store::in_memory().await.unwrap();
         let user = store
             .create_user(
@@ -147,6 +144,15 @@ mod tests {
             .await
             .unwrap();
         (store, garden.id, user.id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tests_support::*;
+
+    fn geometry() -> TankGeometry {
+        TankGeometry::STUDIO_2
     }
 
     #[tokio::test]
@@ -326,5 +332,142 @@ mod tests {
         // button press, and the level sensor measures it directly.
         assert_eq!(TankEvent::for_task(TaskKind::AddWater, &geometry), None);
         assert_eq!(TankEvent::for_task(TaskKind::Harvest, &geometry), None);
+    }
+}
+
+// --- Schedule -------------------------------------------------------------------------
+
+impl Store {
+    /// The programme the agent should be running, if one has been set.
+    ///
+    /// `None` means the brain has no opinion, which the agent reads as "keep what you
+    /// have". It never means "stop": a brain that has forgotten a garden must not be
+    /// able to turn its lights off.
+    pub async fn schedule(&self, garden: GardenId) -> Result<Option<Schedule>> {
+        let row = sqlx::query("SELECT schedule FROM garden_schedule WHERE garden_id = ?1")
+            .bind(garden.to_string())
+            .fetch_optional(&self.db)
+            .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let text: String = row.try_get("schedule")?;
+        serde_json::from_str(&text)
+            .map(Some)
+            .map_err(|e| StoreError::Corrupt(format!("schedule: {e}")))
+    }
+
+    /// Set the programme. Refuses one the hardware should not be asked to run.
+    ///
+    /// Validated here as well as on the agent. The agent's check is the one that
+    /// protects the pins; this one means a bad schedule is rejected where someone can
+    /// see the error, rather than accepted and then silently ignored by every Pi.
+    pub async fn set_schedule(
+        &self,
+        garden: GardenId,
+        schedule: &Schedule,
+        now: Timestamp,
+    ) -> Result<()> {
+        schedule
+            .validate()
+            .map_err(|e| StoreError::Corrupt(e.to_string()))?;
+        let text = serde_json::to_string(schedule)
+            .map_err(|e| StoreError::Corrupt(format!("schedule: {e}")))?;
+
+        sqlx::query(
+            "INSERT INTO garden_schedule (garden_id, schedule, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(garden_id) DO UPDATE SET
+                schedule = excluded.schedule, updated_at = excluded.updated_at",
+        )
+        .bind(garden.to_string())
+        .bind(text)
+        .bind(ts::encode(now))
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Stop sending a schedule. The agent keeps running whatever it last received.
+    pub async fn clear_schedule(&self, garden: GardenId) -> Result<()> {
+        sqlx::query("DELETE FROM garden_schedule WHERE garden_id = ?1")
+            .bind(garden.to_string())
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::tests_support::*;
+    use gardyn_hal::Schedule;
+
+    #[tokio::test]
+    async fn a_garden_has_no_schedule_until_one_is_set() {
+        let (store, garden, _) = fixture().await;
+        assert_eq!(store.schedule(garden).await.unwrap(), None);
+
+        store
+            .set_schedule(garden, &Schedule::DEFAULT, t0())
+            .await
+            .unwrap();
+        assert_eq!(store.schedule(garden).await.unwrap(), Some(Schedule::DEFAULT));
+    }
+
+    #[tokio::test]
+    async fn setting_a_schedule_replaces_the_previous_one() {
+        let (store, garden, _) = fixture().await;
+        store
+            .set_schedule(garden, &Schedule::DEFAULT, t0())
+            .await
+            .unwrap();
+        let shorter = Schedule {
+            light_hours: 12.0,
+            ..Schedule::DEFAULT
+        };
+        store.set_schedule(garden, &shorter, t0()).await.unwrap();
+        assert_eq!(store.schedule(garden).await.unwrap(), Some(shorter));
+    }
+
+    #[tokio::test]
+    async fn a_schedule_the_hardware_should_not_run_is_refused_at_the_boundary() {
+        // Rejected where a person can see the error, rather than accepted and then
+        // silently ignored by every Pi that receives it.
+        let (store, garden, _) = fixture().await;
+        let greedy = Schedule {
+            pump_duty: 1.0,
+            ..Schedule::DEFAULT
+        };
+        assert!(store.set_schedule(garden, &greedy, t0()).await.is_err());
+        assert_eq!(store.schedule(garden).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn clearing_means_no_opinion_rather_than_darkness() {
+        let (store, garden, _) = fixture().await;
+        store
+            .set_schedule(garden, &Schedule::DEFAULT, t0())
+            .await
+            .unwrap();
+        store.clear_schedule(garden).await.unwrap();
+        assert_eq!(store.schedule(garden).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn one_gardens_schedule_is_invisible_to_another() {
+        let (store, mine, user) = fixture().await;
+        let theirs = store
+            .create_garden(
+                "Theirs",
+                gardyn_core::DeviceModel::Studio2,
+                "UTC",
+                user,
+                t0(),
+            )
+            .await
+            .unwrap();
+        store.set_schedule(mine, &Schedule::DEFAULT, t0()).await.unwrap();
+        assert_eq!(store.schedule(theirs.id).await.unwrap(), None);
     }
 }

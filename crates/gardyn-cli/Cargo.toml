@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 gardyn-auth.workspace = true
 gardyn-core.workspace = true
+gardyn-hal.workspace = true
 gardyn-rules.workspace = true
 gardyn-store.workspace = true
 gardyn-vision.workspace = true

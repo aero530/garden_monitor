@@ -8,6 +8,7 @@
 //!
 //! See HARDWARE.md for the full runbook.
 
+mod actuators;
 mod brain;
 mod camera;
 mod hardware;
@@ -17,6 +18,7 @@ use brain::{AGENT_VERSION, Client};
 use clap::{Parser, Subcommand};
 use gardyn_core::{GardenId, Timestamp};
 use gardyn_proto::HeartbeatRequest;
+use gardyn_hal::{Heartbeat, Schedule};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -82,6 +84,31 @@ enum Command {
 
     /// The daemon: register, then sample and photograph on a schedule.
     Run {
+        /// **Phase 6.** Drive the light and pump pins from the resident schedule.
+        ///
+        /// Off by default and staying that way. Until the factory firmware is
+        /// disabled it owns these pins, and two processes fighting over a PWM line is
+        /// how you lose a crop. Turn this on only after `pwm-parity.csv` is recorded
+        /// and `gardyn-guard` has been proven.
+        #[arg(long, env = "GARDYN_OWN_ACTUATORS", default_value_t = false)]
+        own_actuators: bool,
+
+        /// Where `gardyn-guard` says it has seized the pins.
+        #[arg(
+            long,
+            env = "GARDYN_GUARD_MARKER",
+            default_value = "/run/gardyn/guard.engaged"
+        )]
+        guard_marker: PathBuf,
+
+        /// File touched every tick, which is what tells the guard we are alive.
+        #[arg(
+            long,
+            env = "GARDYN_HEARTBEAT",
+            default_value = "/run/gardyn/edge.heartbeat"
+        )]
+        heartbeat: PathBuf,
+
         /// Seconds between sensor samples.
         #[arg(long, env = "GARDYN_SAMPLE_SECONDS", default_value_t = 60)]
         sample_seconds: u64,
@@ -235,10 +262,74 @@ async fn async_main(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             sample_seconds,
             frame_seconds,
             name,
-        } => run_daemon(client, &name, sample_seconds, frame_seconds).await?,
+            own_actuators,
+            guard_marker,
+            heartbeat,
+        } => {
+            run_daemon(
+                client,
+                &name,
+                sample_seconds,
+                frame_seconds,
+                DaemonControl {
+                    own_actuators,
+                    guard_marker,
+                    heartbeat,
+                },
+            )
+            .await?
+        }
         _ => unreachable!("handled before the runtime starts"),
     }
     Ok(())
+}
+
+/// The actuator-related half of `run`'s configuration.
+struct DaemonControl {
+    own_actuators: bool,
+    guard_marker: PathBuf,
+    heartbeat: PathBuf,
+}
+
+/// Touch the heartbeat file. This is the only thing keeping the failsafe asleep.
+///
+/// Written before anything else each tick, and deliberately not conditional on the
+/// brain being reachable: an agent that is alive and merely offline is still driving
+/// the garden correctly from its resident schedule, and letting the guard seize the
+/// pins because the LAN is down would be a self-inflicted outage.
+fn beat(heartbeat: &Heartbeat, note: &str) {
+    if let Err(e) = heartbeat.touch(note) {
+        tracing::warn!(%e, path = %heartbeat.path().display(), "cannot write the heartbeat");
+    }
+}
+
+/// What the heartbeat file says, beyond the fact that it is recent.
+///
+/// The guard only cares about the mtime, but a person reading `/run/gardyn` at three
+/// in the morning wants to know what the agent thinks it is driving — and if the pins
+/// disagree with this, the problem is the wiring rather than the software.
+fn heartbeat_note(actuators: Option<&actuators::OwnedActuators>) -> String {
+    match actuators {
+        Some(a) => format!(
+            "{AGENT_VERSION} light={:.0}% pump={:.0}%",
+            a.light().percent(),
+            a.pump().percent()
+        ),
+        None => format!("{AGENT_VERSION} read-only"),
+    }
+}
+
+/// Local seconds since midnight, for the resident schedule.
+///
+/// The schedule is in local hours because that is how a person thinks about when their
+/// lights should come on. A Pi with the wrong timezone is therefore a real failure
+/// mode, which is why the applied setpoint is logged with the hour it was computed for.
+fn seconds_since_local_midnight(now: Timestamp) -> u32 {
+    let zoned = now.to_zoned(jiff::tz::TimeZone::system());
+    let hour = zoned.hour().clamp(0, 23) as u32;
+    let minute = zoned.minute().clamp(0, 59) as u32;
+    let second = zoned.second().clamp(0, 59) as u32;
+    hour * 3600 + minute * 60 + second
 }
 
 async fn run_daemon(
@@ -246,6 +337,7 @@ async fn run_daemon(
     name: &str,
     sample_seconds: u64,
     frame_seconds: u64,
+    control: DaemonControl,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sample_interval = Duration::from_secs(sample_seconds.max(5));
     let component = client.register(name, sample_seconds as i64).await?;
@@ -256,9 +348,56 @@ async fn run_daemon(
         "registered with the brain"
     );
 
+    // The resident schedule. Starts at the default and is replaced by whatever the
+    // brain sends; it is never cleared, because "no opinion" must not mean "dark".
+    let heartbeat = Heartbeat::new(&control.heartbeat);
+    let mut schedule = Schedule::DEFAULT;
+    let mut actuators = if control.own_actuators {
+        tracing::warn!(
+            "actuator control is ON — this agent is driving the lights and pump, so \
+             the factory firmware must already be disabled"
+        );
+        match actuators::OwnedActuators::open(gardyn_hal::GuardMarker::new(
+            &control.guard_marker,
+        )) {
+            Ok(driver) => Some(driver),
+            Err(e) => {
+                // Refusing to start would be worse: telemetry is still useful, and the
+                // failsafe picks up the pins once the heartbeat stops.
+                tracing::error!(%e, "cannot take the pins; continuing read-only");
+                None
+            }
+        }
+    } else {
+        tracing::info!("read-only: the factory firmware still owns the lights and pump");
+        None
+    };
+
     let mut since_frame = Duration::ZERO;
     loop {
         let now = Timestamp::now();
+        // Beaten before anything else, so a slow sensor read or a stalled upload can
+        // never look like a dead agent to the failsafe.
+        beat(&heartbeat, &heartbeat_note(actuators.as_ref()));
+
+        if let Some(driver) = actuators.as_mut() {
+            let seconds = seconds_since_local_midnight(now);
+            let setpoint = schedule.setpoint(seconds);
+            match driver.apply(setpoint) {
+                Ok(actuators::Applied::Changed) => tracing::info!(
+                    local_hour = seconds / 3600,
+                    light = setpoint.light.percent(),
+                    pump = setpoint.pump.percent(),
+                    "setpoint applied"
+                ),
+                Ok(_) => {}
+                Err(e) => tracing::error!(%e, "could not drive the pins"),
+            }
+            // Re-beat so the note carries what was just applied rather than the
+            // previous tick's values.
+            beat(&heartbeat, &heartbeat_note(actuators.as_ref()));
+        }
+
         let snapshot = hardware::read_sensors(now);
 
         // Clear any backlog first, so history stays in order after an outage.
@@ -269,7 +408,26 @@ async fn run_daemon(
         }
 
         let status = match client.send_telemetry(&snapshot).await {
-            Ok(_) => HeartbeatRequest::ok(AGENT_VERSION),
+            Ok(accepted) => {
+                if let Some(sent) = accepted.schedule {
+                    // Validated before adoption. This is the only message the brain
+                    // can send that changes what the hardware does, so a malformed one
+                    // is refused rather than clamped into something plausible.
+                    match sent.validate() {
+                        Ok(()) if sent != schedule => {
+                            tracing::info!(
+                                light_hours = sent.light_hours,
+                                daily_duty_hours = sent.daily_duty_hours(),
+                                "adopted a new schedule from the brain"
+                            );
+                            schedule = sent;
+                        }
+                        Ok(()) => {}
+                        Err(e) => tracing::error!(%e, "refused the schedule the brain sent"),
+                    }
+                }
+                HeartbeatRequest::ok(AGENT_VERSION)
+            }
             Err(e) => {
                 tracing::warn!(%e, spooled = client.spooled_count(), "telemetry buffered");
                 HeartbeatRequest::degraded(AGENT_VERSION, e.to_string())

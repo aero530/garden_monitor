@@ -53,6 +53,19 @@ pub struct TelemetryAccepted {
     /// Echoed back so the agent can log what the brain thinks it has, which is the
     /// fastest way to spot a probe that is wired up but reading nothing.
     pub capabilities: Vec<String>,
+
+    /// The schedule the agent should be running, if the brain has one for it.
+    ///
+    /// Carried on the telemetry response rather than pushed down a separate channel.
+    /// The agent already makes this call every sample, so the schedule arrives without
+    /// a new endpoint, a new connection, or anything for a firewall to allow inbound —
+    /// and an agent that cannot reach the brain simply keeps the last one it was
+    /// given, which is exactly the required behaviour.
+    ///
+    /// `None` means the brain has no opinion and the agent should keep running
+    /// whatever it has. It never means "stop".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<gardyn_hal::Schedule>,
 }
 
 /// Registration, as posted to `POST /api/components/register`.
