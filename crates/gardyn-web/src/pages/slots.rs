@@ -167,7 +167,13 @@ fn occupied(
             }
             h3 style="margin:0.4rem 0 0.1rem" {
                 @match variety {
-                    Some(v) => (v.name),
+                    // The moment you want to know how to look after something is the
+                    // moment you are looking at it, so the name is the way in.
+                    Some(v) => a href=(format!("/varieties/{}", v.id))
+                                 style="text-decoration:none; color:inherit;
+                                        border-bottom:1px dotted var(--line)" {
+                        (v.name)
+                    },
                     // A planting whose variety left the book still shows something
                     // rather than vanishing from the grid.
                     None => (planting.variety.0),

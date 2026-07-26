@@ -8,3 +8,4 @@ pub mod members;
 pub mod notify;
 pub mod slots;
 pub mod tasks;
+pub mod varieties;

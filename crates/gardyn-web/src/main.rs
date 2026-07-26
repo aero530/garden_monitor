@@ -76,7 +76,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     dispatch::spawn(state.clone());
 
-    let router = Router::new()
+    let router = router(state);
+
+    let listener = tokio::net::TcpListener::bind(&bind).await?;
+    tracing::info!("listening on {bind} (base url {base_url})");
+    axum::serve(listener, router).await?;
+    Ok(())
+}
+
+/// The whole route table.
+///
+/// Kept out of `main` so a test can build it. axum validates path patterns when the
+/// router is assembled, not when it is compiled — a malformed one (`/x/{token}.ics`,
+/// say) type-checks, passes every unit test, and then panics on the first start.
+fn router(state: AppState) -> Router {
+    Router::new()
         .merge(pages::gardens::routes())
         .merge(pages::auth::routes())
         .merge(pages::members::routes())
@@ -84,15 +98,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(pages::frames::routes())
         .merge(pages::slots::routes())
         .merge(pages::tasks::routes())
+        .merge(pages::varieties::routes())
         .merge(pages::fleet::routes())
         .merge(api::routes())
         .layer(TraceLayer::new_for_http())
-        .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind(&bind).await?;
-    tracing::info!("listening on {bind} (base url {base_url})");
-    axum::serve(listener, router).await?;
-    Ok(())
+        .with_state(state)
 }
 
 /// Assemble whatever channels the environment configures.
@@ -143,4 +153,30 @@ fn build_notifier() -> Option<gardyn_notify::Notifier> {
         });
 
     (ntfy.is_some() || email.is_some()).then(|| gardyn_notify::Notifier::new(ntfy, email))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The route table is only validated when it is built, so build it.
+    ///
+    /// This is the cheapest possible guard against a start-up panic: a path pattern
+    /// axum rejects costs nothing to catch here and takes the whole service down
+    /// otherwise.
+    #[tokio::test]
+    async fn every_route_pattern_is_valid() {
+        let store = gardyn_store::Store::open_with(":memory:", std::env::temp_dir())
+            .await
+            .expect("in-memory store");
+        let state = AppState::new(
+            store,
+            Config {
+                secure_cookies: false,
+                base_url: "http://localhost:8080".into(),
+                agent_token: None,
+            },
+        );
+        let _ = router(state);
+    }
 }

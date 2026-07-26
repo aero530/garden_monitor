@@ -16,6 +16,13 @@ use std::fmt;
 /// The catalogue, embedded so the binary needs no data files alongside it.
 const CATALOGUE: &str = include_str!("../data/varieties.json");
 
+/// Gardyn's own prose for each plant: what it is, and how to look after it.
+///
+/// Held separately from the structured catalogue because it is long, optional, and
+/// arrives one article at a time. A variety with no entry here still works; it simply
+/// shows no description.
+const DETAILS: &str = include_str!("../data/variety-details.json");
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct VarietyId(pub String);
@@ -151,6 +158,16 @@ pub struct Variety {
     pub harvest_canopy_cm2: Option<f32>,
     pub ec_target: Option<TargetRange>,
     pub ph_target: Option<TargetRange>,
+    /// Gardyn's "Qualities" prose: flavour, nutrition, what it looks like.
+    ///
+    /// Kept as paragraphs rather than one blob, because Gardyn writes the care
+    /// section as labelled entries ("💡 Temperature: …", "✂️ Pruning: …") and that
+    /// structure is most of what makes it readable.
+    pub qualities: Vec<String>,
+    /// Gardyn's "Care & Harvest" prose: temperature, pruning, pests, when to pick.
+    pub care: Vec<String>,
+    /// The article the prose came from, so the page can link back to the source.
+    pub article_url: Option<String>,
 }
 
 impl Variety {
@@ -259,8 +276,33 @@ impl Entry {
             harvest_canopy_cm2: Some(canopy_area(canopy)),
             ec_target: Some(ec_target(self.category)),
             ph_target: Some(TargetRange::new(5.5, 6.5)),
+            qualities: Vec::new(),
+            care: Vec::new(),
+            article_url: None,
         }
     }
+}
+
+/// Whether Gardyn's prose has been transcribed for this variety yet.
+impl Variety {
+    pub fn has_description(&self) -> bool {
+        !self.qualities.is_empty() || !self.care.is_empty()
+    }
+}
+
+#[derive(Deserialize)]
+struct DetailFile {
+    details: BTreeMap<String, Detail>,
+}
+
+#[derive(Deserialize)]
+struct Detail {
+    #[serde(default)]
+    qualities: Vec<String>,
+    #[serde(default)]
+    care: Vec<String>,
+    #[serde(default)]
+    source: Option<String>,
 }
 
 fn default_sprout(category: Category) -> [u16; 2] {
@@ -376,7 +418,28 @@ impl VarietyBook {
     pub fn gardyn() -> Self {
         let parsed: Catalogue =
             serde_json::from_str(CATALOGUE).expect("embedded variety catalogue is valid JSON");
-        parsed.varieties.into_iter().map(Entry::into_variety).collect()
+        let detail: DetailFile =
+            serde_json::from_str(DETAILS).expect("embedded variety details are valid JSON");
+
+        let mut book: Self = parsed.varieties.into_iter().map(Entry::into_variety).collect();
+        for (id, d) in detail.details {
+            // A detail entry for an id that is not in the catalogue is ignored rather
+            // than being an error: the two files are transcribed independently.
+            if let Some(variety) = book.0.get_mut(&VarietyId(id)) {
+                variety.qualities = d.qualities;
+                variety.care = d.care;
+                variety.article_url = d.source;
+            }
+        }
+        book
+    }
+
+    /// How many varieties have Gardyn's prose transcribed.
+    ///
+    /// Surfaced so the catalogue page can be honest about coverage instead of
+    /// silently showing blanks.
+    pub fn described_count(&self) -> usize {
+        self.0.values().filter(|v| v.has_description()).count()
     }
 
     /// Alias kept for call sites that predate the full catalogue.

@@ -40,6 +40,7 @@ fn nav(actor: &Actor) -> Markup {
             a.brand href="/" { "🌱 Gardyn" }
             div.spacer {}
             a href="/" { "Gardens" }
+            a href="/varieties" { "Plants" }
             @if actor.is_admin() {
                 a href="/system" { "System" }
             }
@@ -207,6 +208,9 @@ th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-
 .zone-high { background: var(--advisory); }
 .zone-medium { background: var(--accent); }
 .zone-low { background: var(--line); }
+.zone-pill-high { color: var(--advisory); }
+.zone-pill-medium { color: var(--accent); }
+.zone-pill-low { color: var(--muted); }
 .slot-row { display: flex; gap: 0.5rem; align-items: stretch; }
 .slot-row > .card, .slot-row > .slot { flex: 1; min-width: 0; margin-bottom: 0; }
 @media (max-width: 34rem) {
