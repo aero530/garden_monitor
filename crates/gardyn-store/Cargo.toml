@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 gardyn-auth.workspace = true
 gardyn-core.workspace = true
+gardyn-notify.workspace = true
 jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true

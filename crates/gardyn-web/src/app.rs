@@ -48,6 +48,8 @@ impl Config {
 pub struct AppState {
     pub store: Store,
     pub config: Arc<Config>,
+    /// `None` when no channel is configured. The web UI still works; nothing is sent.
+    pub notifier: Option<Arc<gardyn_notify::Notifier>>,
 }
 
 impl AppState {
@@ -55,7 +57,14 @@ impl AppState {
         Self {
             store,
             config: Arc::new(config),
+            notifier: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_notifier(mut self, notifier: Option<gardyn_notify::Notifier>) -> Self {
+        self.notifier = notifier.map(Arc::new);
+        self
     }
 
     pub fn now(&self) -> jiff::Timestamp {

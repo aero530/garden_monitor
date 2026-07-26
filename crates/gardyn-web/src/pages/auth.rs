@@ -391,6 +391,9 @@ async fn account(State(state): State<AppState>, Auth(actor): Auth) -> Result<Mar
                 " · " (gardens.iter().filter(|g| g.is_someone_elses()).count()) " shared with you"
             }
 
+            h2 { "Notifications" }
+            p { a.button href="/account/notifications" { "Notification settings" } }
+
             h2 { "Signed-in devices" }
             div.table-wrap {
                 table {

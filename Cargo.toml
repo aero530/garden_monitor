@@ -7,6 +7,7 @@ members = [
     "crates/gardyn-guard",
     "crates/gardyn-proto",
     "crates/gardyn-hal",
+    "crates/gardyn-notify",
     "crates/gardyn-rules",
     "crates/gardyn-sim",
     "crates/gardyn-store",
@@ -23,6 +24,7 @@ license = "MIT"
 gardyn-auth = { path = "crates/gardyn-auth" }
 gardyn-core = { path = "crates/gardyn-core" }
 gardyn-hal = { path = "crates/gardyn-hal" }
+gardyn-notify = { path = "crates/gardyn-notify" }
 gardyn-proto = { path = "crates/gardyn-proto" }
 gardyn-rules = { path = "crates/gardyn-rules" }
 gardyn-sim = { path = "crates/gardyn-sim" }

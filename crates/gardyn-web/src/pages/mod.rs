@@ -5,5 +5,6 @@ pub mod fleet;
 pub mod frames;
 pub mod gardens;
 pub mod members;
+pub mod notify;
 pub mod slots;
 pub mod tasks;

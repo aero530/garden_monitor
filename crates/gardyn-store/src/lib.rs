@@ -9,6 +9,7 @@ pub mod accounts;
 pub mod fleet;
 pub mod frames;
 pub mod gardens;
+pub mod notifications;
 pub mod plantings;
 pub mod readings;
 pub mod schema;

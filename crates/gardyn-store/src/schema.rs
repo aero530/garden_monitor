@@ -149,6 +149,41 @@ CREATE TABLE IF NOT EXISTS action_grants (
     used_at    TEXT
 );
 
+-- Per-person notification settings.
+--
+-- Keyed on the user, not on (user, garden): quiet hours are a property of when you
+-- sleep, not of which tower is asking.
+CREATE TABLE IF NOT EXISTS notification_prefs (
+    user_id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    -- ntfy topic. Null until the phone app is set up; treated as "no push".
+    ntfy_topic      TEXT,
+    email_enabled   INTEGER NOT NULL DEFAULT 0,
+    quiet_from_hour INTEGER NOT NULL DEFAULT 21,
+    quiet_to_hour   INTEGER NOT NULL DEFAULT 7,
+    -- Offset from UTC in minutes. Quiet hours are meaningless without it, and the
+    -- garden's timezone is the wrong one — the person might not live there.
+    utc_offset_minutes INTEGER NOT NULL DEFAULT 0,
+    -- Digest of the calendar feed secret. The secret itself is shown once.
+    calendar_digest TEXT UNIQUE
+);
+
+-- What was sent, to whom, about what.
+--
+-- The dispatcher reads this to avoid re-announcing a task that has not changed. The
+-- rules re-emit every tick, so without it the same root check would ping on every
+-- evaluation — which is exactly how a notification system gets muted.
+CREATE TABLE IF NOT EXISTS notifications (
+    id         TEXT PRIMARY KEY,
+    garden_id  TEXT NOT NULL REFERENCES gardens(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    task_key   TEXT NOT NULL,
+    severity   TEXT NOT NULL,
+    channels   TEXT NOT NULL,
+    sent_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notifications_lookup
+    ON notifications(garden_id, user_id, task_key, sent_at DESC);
+
 -- Sensor readings from the edge agent.
 --
 -- Every column is nullable because a probe that is not fitted reports nothing, and

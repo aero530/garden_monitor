@@ -122,6 +122,17 @@ impl Store {
         Ok(garden)
     }
 
+    /// Every garden on the server, for the notification sweep.
+    ///
+    /// Deliberately not membership-scoped: the dispatcher acts on behalf of the
+    /// system, then filters per member. Nothing user-facing calls this.
+    pub async fn all_gardens(&self) -> Result<Vec<Garden>> {
+        let rows = sqlx::query("SELECT * FROM gardens ORDER BY created_at")
+            .fetch_all(&self.db)
+            .await?;
+        rows.iter().map(garden_from_row).collect()
+    }
+
     pub async fn find_garden(&self, id: GardenId) -> Result<Option<Garden>> {
         let row = sqlx::query("SELECT * FROM gardens WHERE id = ?1")
             .bind(id.to_string())
