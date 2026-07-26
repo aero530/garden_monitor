@@ -1,0 +1,30 @@
+# OPTIONAL. Only needed for the VisualDiagnosis capability — a local vision model
+# that writes plain-language "what is wrong with this plant" notes.
+#
+# Not part of the base install. It wants 8 GB of RAM on its own and the rest of the
+# system is fully useful without it. Install this only when you decide to turn
+# VisualDiagnosis on.
+#
+# Install to /etc/containers/systemd/gardyn-ollama.container
+
+[Unit]
+Description=Ollama for Gardyn visual diagnosis
+Documentation=https://github.com/ollama/ollama
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/ollama/ollama:latest
+Volume=/var/lib/gardyn-ollama:/root/.ollama:Z
+Network=gardyn.network
+# Deliberately no PublishPort. Nothing outside the gardyn network should reach
+# this, and the brain finds it at http://gardyn-ollama:11434 by container name.
+
+[Service]
+Restart=always
+RestartSec=30
+# Pulling a multi-gigabyte model on first start takes a while.
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

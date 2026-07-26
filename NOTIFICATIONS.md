@@ -5,6 +5,33 @@ between the garden and you.
 
 ---
 
+## The path a task takes
+
+```mermaid
+flowchart LR
+  rules["rule engine<br/><small>every 5 min</small>"] --> task{{"outstanding task"}}
+  task --> policy["delivery policy<br/><small>gardyn-notify</small>"]
+
+  policy -->|"info · advisory"| brief["morning brief<br/><small>08:00 local</small>"]
+  policy -->|"quiet hours,<br/>below critical"| brief
+  policy -->|"already told you<br/>&lt; 24 h ago"| drop(["held"])
+  policy -->|"4th+ this sweep"| drop
+  policy -->|"important +"| send["send now"]
+
+  send --> ntfy["ntfy<br/><small>self-hosted</small>"]
+  send -->|"urgent · critical"| smtp["SMTP relay"]
+  brief --> ntfy
+
+  ntfy --> phone["your phone"]
+  smtp --> inbox["your inbox"]
+  cal["iCal feed"] -.->|"subscribed once"| calendar["your calendar"]
+  task --> cal
+```
+
+Everything to the left of `send` is about *not* telling you. That is most of the work:
+the rules re-emit continuously, and a system that forwarded all of it would be muted
+inside a week.
+
 ## What you get
 
 | Channel | Carries | Reliability |
@@ -26,6 +53,27 @@ between the garden and you.
 Priority 5 is the top of the ladder because SMS was ruled out. On both iOS and Android
 it breaks through a silenced phone, which is what "the tank is dry in twelve hours"
 needs and what nothing else does.
+
+### What happens after it reaches you
+
+```mermaid
+stateDiagram-v2
+  [*] --> Outstanding: rule emits it
+  Outstanding --> Notified: policy sends it
+  Notified --> Notified: re-sent if it gets worse,<br/>or after 24 h
+  Notified --> Done: you tap Done
+  Notified --> Snoozed: you tap Snooze
+  Notified --> Dismissed: you tap N/A
+  Snoozed --> Outstanding: after 24 h
+  Done --> Outstanding: the rule still emits it<br/>30 min later
+  Done --> [*]: the rule stops emitting it
+  Dismissed --> [*]
+```
+
+The arrow from **Done** back to **Outstanding** is the one that matters. You tap "added
+water"; if the level sensor has not moved half an hour later, the task quietly reopens.
+Without it, "done" means "I pressed a button", and the whole system becomes a thing you
+have to double-check — which is exactly what it was built to avoid.
 
 Three more rules keep this from becoming noise:
 

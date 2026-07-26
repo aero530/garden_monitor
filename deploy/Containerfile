@@ -1,0 +1,59 @@
+# The brain, as a container image.
+#
+# Two stages: a build stage with the Rust toolchain, and a runtime stage with
+# nothing but the binary and a CA bundle. The toolchain is ~1.5 GB and has no
+# business being on a running server.
+#
+# Build from the repository root, not from this directory:
+#     podman build -t localhost/gardyn-web:latest -f deploy/Containerfile .
+
+# ---------------------------------------------------------------------------
+# Stage 1 — build
+# ---------------------------------------------------------------------------
+FROM docker.io/library/rust:1.92-bookworm AS build
+
+# libsqlite3-sys compiles SQLite from source (sqlx's `sqlite` feature bundles it),
+# so a C compiler is needed here — and, because it is bundled, *not* at runtime.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+# --locked so the image is built from the committed Cargo.lock and a dependency
+# cannot quietly change between your machine and the server.
+RUN cargo build --release --locked -p gardyn-web
+
+# ---------------------------------------------------------------------------
+# Stage 2 — runtime
+# ---------------------------------------------------------------------------
+FROM docker.io/library/debian:bookworm-slim
+
+# ca-certificates: outbound TLS to an SMTP relay.
+# tzdata: jiff resolves named zones from the system database.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/target/release/gardyn-web /usr/local/bin/gardyn-web
+
+# Matches the uid the Quadlet unit runs as and the owner of /var/lib/gardyn on the
+# host. Numeric, not a name, so it stays correct however the image is inspected.
+RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin gardyn
+USER 1000:1000
+
+# One mount, at the same path inside the container as on the host, so a path in a
+# log line means the same thing in both places. `db/` and `frames/` live under it.
+VOLUME ["/var/lib/gardyn"]
+
+# GARDYN_DATA_DIR is a parent: the server appends `/frames` to it.
+ENV GARDYN_DB=sqlite:///var/lib/gardyn/db/gardyn.db \
+    GARDYN_DATA_DIR=/var/lib/gardyn \
+    GARDYN_BIND=0.0.0.0:8080
+
+EXPOSE 8080
+
+# No shell form: the binary is pid 1 and gets SIGTERM directly, so a restart is a
+# clean shutdown rather than a ten-second kill.
+ENTRYPOINT ["/usr/local/bin/gardyn-web"]

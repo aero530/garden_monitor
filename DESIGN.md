@@ -111,22 +111,41 @@ calendar entries into measured triggers.
 
 ## 4. Architecture
 
+```mermaid
+flowchart LR
+  subgraph pi["Gardyn Studio 2 · Raspberry Pi"]
+    direction TB
+    edge["<b>gardyn-edge</b><br/>sensor polling<br/>camera capture<br/>PWM light + pump<br/>offline spool"]
+    guard["<b>gardyn-guard</b><br/>heartbeat watchdog<br/>failsafe PWM takeover"]
+    wdt["bcm2835_wdt<br/><i>hardware watchdog</i>"]
+    guard -->|"seizes PWM if<br/>the heartbeat stops"| edge
+    wdt -->|"reboots a hung kernel"| edge
+  end
+
+  subgraph vm["Fedora 44 VM on Proxmox"]
+    direction TB
+    brain["<b>gardyn-web</b> — the brain<br/>ingest → SQLite<br/>state estimation<br/>rule engine → Tasks<br/>vision pipeline<br/>dispatcher<br/>axum + maud UI"]
+    ntfy["<b>ntfy</b><br/><i>container</i>"]
+    ts["<b>Tailscale</b><br/>reaches ack links off-LAN<br/>without exposing the VM"]
+    brain --> ntfy
+    brain --- ts
+    ntfy --- ts
+  end
+
+  phone(["Your phone"])
+
+  edge -->|"telemetry + frames<br/>HTTP, bearer token"| brain
+  brain -.->|"schedule updates<br/><i>phase 6</i>"| edge
+  ts ==> phone
 ```
-┌─ Gardyn Studio 2 (Pi) ─────────┐        ┌─ Fedora 44 VM on Proxmox ──────────────┐
-│                                │        │                                        │
-│  gardyn-edge     (Rust)        │  MQTT  │  mosquitto        (container)          │
-│   · sensor polling             ├───────►│  gardyn-brain     (container)          │
-│   · camera capture             │        │   · ingest → SQLite                    │
-│   · PWM light + pump control   │◄───────┤   · state estimation                   │
-│   · offline ring buffer (redb) │schedule│   · rules engine → Tasks               │
-│                                │ updates│   · vision pipeline                    │
-│  gardyn-guard    (Rust)        │        │   · scheduler → ntfy / SMTP / iCal     │
-│   · heartbeat watchdog         │        │   · axum + HTMX dashboard              │
-│   · failsafe PWM takeover      │        │                                        │
-│                                │        │  Tailscale — phone reaches ack links   │
-│  bcm2835_wdt (hardware)        │        │  off-LAN without exposing the VM       │
-└────────────────────────────────┘        └────────────────────────────────────────┘
-```
+
+The dashed arrow is the only one that does not exist yet: schedule push arrives with
+firmware takeover in phase 6. Note also that there is **no message broker**. An earlier
+draft of this design routed telemetry over MQTT via mosquitto; the implementation uses
+plain HTTP with a bearer token, which removed a container, a protocol, and a class of
+delivery-semantics questions that a device sending one sample a minute did not need.
+`gardyn-proto` still declares MQTT topic names against a future in which the traffic
+justifies a broker.
 
 ### The load-bearing rule
 
@@ -397,23 +416,65 @@ target is tier 1 and trivial. If it's ARMv6 (Pi Zero v1), use `cross` — on Fed
 
 ## 12. Crate layout
 
+Eleven crates. Every arrow is a real dependency in `Cargo.toml`; `gardyn-core` is at the
+bottom of everything and depends on nothing.
+
+```mermaid
+flowchart TD
+  core["<b>gardyn-core</b><br/>domain types, zero I/O"]
+
+  hal["<b>gardyn-hal</b><br/>sensor + actuator traits"]
+  rules["<b>gardyn-rules</b><br/>the rule engine"]
+  auth["<b>gardyn-auth</b><br/>accounts, roles, sharing"]
+  proto["<b>gardyn-proto</b><br/>edge ↔ brain wire format"]
+  notify["<b>gardyn-notify</b><br/>ntfy · SMTP · iCal"]
+
+  sim["<b>gardyn-sim</b><br/>physics + season runner"]
+  store["<b>gardyn-store</b><br/>SQLite + frame files"]
+
+  web["<b>gardyn-web</b><br/>the brain"]
+  edge["<b>gardyn-edge</b><br/>the Pi agent"]
+  guard["<b>gardyn-guard</b><br/>failsafe supervisor"]
+
+  core --> hal & rules & auth & proto & notify
+  hal --> sim & edge & guard
+  rules --> sim & store & web
+  auth --> store & web
+  notify --> store & web
+  proto --> edge & web
+  store --> web
+  sim --> web
+  core --> web
+  core --> edge
+
+  classDef bin fill:#2f7d4f22,stroke:#2f7d4f,stroke-width:2px
+  class web,edge,guard,sim bin
 ```
-crates/
-  gardyn-core/     domain types, zero I/O                      ✅ built
-  gardyn-hal/      sensor/actuator traits + simulated impls    ✅ built
-  gardyn-rules/    pure rule functions over GardenState        ✅ built
-  gardyn-sim/      physics model + season runner               ✅ built
-  gardyn-auth/     accounts, roles, sharing, sessions          ✅ built
-  gardyn-store/    SQLite persistence                          ✅ built
-  gardyn-web/      axum + maud application, fleet view         ✅ built
-  gardyn-proto/    MQTT topics + payload schemas, shared edge↔brain
-  gardyn-edge/     Pi binary: sensors, PWM, camera, MQTT
-  gardyn-guard/    failsafe supervisor, minimal deps
-  gardyn-vision/   frame → per-slot metrics
-  gardyn-notify/   ntfy / SMTP / iCal adapters
-  gardyn-cli/      calibrate, log events, replay history
-data/varieties.json
-deploy/            systemd units, Quadlet files, install.sh
+
+Green outlines are the four binaries; the rest are libraries.
+
+| Crate | What it is | Runs on |
+|---|---|---|
+| `gardyn-core` | Domain types and the variety book. No I/O at all. | everywhere |
+| `gardyn-hal` | Traits for sensors and actuators, plus the duty-cycle failsafes | Pi, simulator |
+| `gardyn-rules` | 21 rules and the capability/precedence engine | brain, simulator |
+| `gardyn-auth` | Accounts, roles, garden sharing, sessions, signed action links | brain |
+| `gardyn-proto` | Wire format shared by the agent and the brain | Pi, brain |
+| `gardyn-notify` | ntfy, SMTP and iCal adapters, plus the delivery policy | brain |
+| `gardyn-store` | SQLite persistence and on-disk camera frames | brain |
+| `gardyn-sim` | Physics model and season runner — **binary** | dev box |
+| `gardyn-web` | The brain: UI, agent API, dispatcher — **binary** | Fedora VM |
+| `gardyn-edge` | Recon, telemetry, camera — **binary** | Raspberry Pi |
+| `gardyn-guard` | Heartbeat supervisor and failsafe — **binary** | Raspberry Pi |
+
+Two crates named in earlier drafts do not exist. `gardyn-vision` was folded into the
+capability model rather than given its own crate, and `gardyn-cli`'s jobs are
+`gardyn-edge` subcommands (`probe`, `read`, `watch-pwm`) instead.
+
+```
+crates/gardyn-core/data/varieties.json          the catalogue
+crates/gardyn-core/data/variety-details.json    Gardyn's own care text
+deploy/                                         Containerfile, Quadlet units, installer
 ```
 
 ### Multi-tenancy

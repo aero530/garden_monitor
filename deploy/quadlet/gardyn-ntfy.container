@@ -1,0 +1,32 @@
+# Self-hosted push. This is the channel that actually reaches your phone.
+#
+# Install to /etc/containers/systemd/gardyn-ntfy.container
+
+[Unit]
+Description=ntfy push server for Gardyn
+Documentation=https://docs.ntfy.sh/config/
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/binwiederhier/ntfy:v2
+Exec=serve
+PublishPort=8090:8090
+Volume=/etc/gardyn/ntfy-server.yml:/etc/ntfy/server.yml:Z,ro
+Volume=/var/lib/gardyn-ntfy:/var/lib/ntfy:Z
+Volume=/var/cache/gardyn-ntfy:/var/cache/ntfy:Z
+Network=gardyn.network
+# ntfy's image runs as root by default; it has no need to.
+User=1000:1000
+NoNewPrivileges=true
+
+# Pinned to the v2 tag rather than :latest, and updated on purpose. `podman
+# auto-update` will pull a new v2.x when one appears.
+AutoUpdate=registry
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

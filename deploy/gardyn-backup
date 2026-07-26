@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Back up the Gardyn database.
+#
+# Install to /usr/local/bin/gardyn-backup (mode 755). Run by gardyn-backup.timer.
+#
+# Uses `VACUUM INTO` rather than copying the file. The database runs in WAL mode,
+# so at any instant the real state is spread across gardyn.db, gardyn.db-wal and
+# gardyn.db-shm — copying just the first gives you a torn, older database that
+# restores without complaint and is missing recent writes. `VACUUM INTO` asks
+# SQLite for a consistent single-file snapshot while the server keeps running.
+#
+# The same applies to Proxmox snapshots of a live VM: snapshot the backup, not the
+# live database.
+
+set -euo pipefail
+
+DB="${GARDYN_DB_PATH:-/var/lib/gardyn/db/gardyn.db}"
+DEST="${GARDYN_BACKUP_DIR:-/var/lib/gardyn/backups}"
+KEEP="${GARDYN_BACKUP_KEEP:-14}"
+FRAMES="${GARDYN_FRAME_DIR:-/var/lib/gardyn/frames}"
+
+if [ ! -f "$DB" ]; then
+  echo "no database at $DB — nothing to back up" >&2
+  exit 0
+fi
+
+mkdir -p "$DEST"
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+out="$DEST/gardyn-$stamp.db"
+
+sqlite3 "$DB" "VACUUM INTO '$out'"
+gzip -f "$out"
+echo "wrote $out.gz ($(du -h "$out.gz" | cut -f1))"
+
+# Keep the newest $KEEP and drop the rest.
+mapfile -t old < <(ls -1t "$DEST"/gardyn-*.db.gz 2>/dev/null | tail -n "+$((KEEP + 1))")
+if [ ${#old[@]} -gt 0 ]; then
+  rm -f -- "${old[@]}"
+  echo "pruned ${#old[@]} old backup(s)"
+fi
+
+# Camera frames are not in the database and are not backed up here — one frame an
+# hour per garden is thousands of files a year, and they are the least valuable
+# thing on the disk. Say so rather than leaving you to assume they are covered.
+if [ -d "$FRAMES" ]; then
+  echo "note: camera frames under $FRAMES are NOT in this backup ($(du -sh "$FRAMES" | cut -f1))"
+fi

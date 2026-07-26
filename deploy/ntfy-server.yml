@@ -1,0 +1,31 @@
+# ntfy server configuration for Gardyn.
+#
+# Install to /etc/gardyn/ntfy-server.yml
+#
+# Change base-url before starting. Everything else is sensible as-is.
+
+# How your PHONE reaches this server — not how the brain reaches it. ntfy stamps
+# this into the action buttons on every notification, so if it is wrong, push
+# arrives and tapping "Done" does nothing.
+base-url: "https://ntfy.your-tailnet.ts.net"
+
+listen-http: ":8090"
+
+cache-file: "/var/cache/ntfy/cache.db"
+# Long enough that a phone which was off overnight still catches up.
+cache-duration: "72h"
+
+# ntfy's default is to let anyone publish to and read any topic. On a LAN that
+# means anyone who can reach the port can push to your phone, or watch what your
+# garden is telling you. Deny by default; grant explicitly.
+auth-file: "/var/lib/ntfy/auth.db"
+auth-default-access: "deny-all"
+
+# The phone app holds a connection open. Without a keepalive shorter than the
+# usual NAT timeout it reconnects constantly and eats battery.
+keepalive-interval: "45s"
+
+# Nothing here sends attachments, and accepting them is a way to fill the disk.
+attachment-cache-dir: ""
+
+behind-proxy: true

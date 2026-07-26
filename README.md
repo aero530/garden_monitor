@@ -13,16 +13,50 @@ Phase 0 (hardware recon) has not started. What exists today is everything that n
 no hardware: the domain model, the rule engine, a simulator good enough to run a
 season in milliseconds, and a multi-user web application.
 
+```mermaid
+flowchart TD
+  core["<b>gardyn-core</b><br/>domain types, zero I/O"]
+  hal["<b>gardyn-hal</b><br/>sensor + actuator traits"]
+  rules["<b>gardyn-rules</b><br/>21 rules + capability engine"]
+  auth["<b>gardyn-auth</b><br/>accounts, roles, sharing"]
+  proto["<b>gardyn-proto</b><br/>edge ↔ brain wire format"]
+  notify["<b>gardyn-notify</b><br/>ntfy · SMTP · iCal"]
+  sim["<b>gardyn-sim</b><br/>physics + season runner"]
+  store["<b>gardyn-store</b><br/>SQLite + frame files"]
+  web["<b>gardyn-web</b><br/>the brain"]
+  edge["<b>gardyn-edge</b><br/>the Pi agent"]
+  guard["<b>gardyn-guard</b><br/>failsafe supervisor"]
+
+  core --> hal & rules & auth & proto & notify
+  hal --> sim & edge & guard
+  rules --> sim & store & web
+  auth --> store & web
+  notify --> store & web
+  proto --> edge & web
+  store --> web
+  sim --> web
+  core --> web & edge
+
+  classDef bin fill:#2f7d4f22,stroke:#2f7d4f,stroke-width:2px
+  class web,edge,guard,sim bin
 ```
-crates/
-  gardyn-core     domain types, zero I/O               —  58 tests
-  gardyn-hal      hardware traits + failsafes          —   5 tests
-  gardyn-rules    21 rules + capability engine         —  87 tests
-  gardyn-sim      physics model + season runner        —  32 tests
-  gardyn-auth     accounts, roles, sharing, sessions   —  78 tests
-  gardyn-store    SQLite persistence + frame storage   —  84 tests
-  gardyn-web      axum + maud web application          —  33 tests
-```
+
+Green outlines are binaries. Each crate has its own README with a fuller diagram,
+worked examples, and — for the hardware crates — pinouts.
+
+| Crate | | Tests |
+|---|---|---|
+| [gardyn-core](crates/gardyn-core/) | domain types, 135-variety plant book, zero I/O | 79 |
+| [gardyn-hal](crates/gardyn-hal/) | hardware traits + duty-cycle failsafes | 5 |
+| [gardyn-proto](crates/gardyn-proto/) | wire format shared by agent and brain | 12 |
+| [gardyn-rules](crates/gardyn-rules/) | 21 rules + capability engine | 87 |
+| [gardyn-auth](crates/gardyn-auth/) | accounts, roles, sharing, signed links | 78 |
+| [gardyn-notify](crates/gardyn-notify/) | ntfy, SMTP, iCal + delivery policy | 44 |
+| [gardyn-store](crates/gardyn-store/) | SQLite persistence + frame storage | 107 |
+| [gardyn-sim](crates/gardyn-sim/) | physics model + season runner | 32 |
+| [gardyn-web](crates/gardyn-web/) | axum + maud application, agent API | 46 |
+| [gardyn-edge](crates/gardyn-edge/) | Pi agent: recon, telemetry, camera | 22 |
+| [gardyn-guard](crates/gardyn-guard/) | heartbeat supervisor, failsafe | 7 |
 
 ## Plantings
 
@@ -146,14 +180,16 @@ colour trend.
 The simulation reports what the rule set achieves against operators of varying
 diligence, and what each piece of optional hardware is worth:
 
-```
-configuration        harvest    canopy interrupts  dry days    tasks
---------------------------------------------------------------------
-stock                   6285      2458        1.2         0      340
-+ water temp            6285      2458        1.2         0      340
-+ canopy vision         8327      2371        1.4         0      336
-+ EC probe              9172      2303        2.8         0      326
-```
+| Configuration | Harvest | Canopy | Interrupts | Dry days | Tasks |
+|---|---:|---:|---:|---:|---:|
+| stock | 6285 | 2458 | 1.2 | 0 | 340 |
+| + water temp | 6285 | 2458 | 1.2 | 0 | 340 |
+| + canopy vision | **8327** | 2371 | 1.4 | 0 | 336 |
+| + EC probe | **9172** | 2303 | 2.8 | 0 | 326 |
+
+Read that as: the $5 water probe buys reasoning, not yield; canopy vision is worth
+about a third more harvest; and the EC probe adds another 10% at the cost of waking
+you up more than twice as often.
 
 ## The central idea: capabilities
 

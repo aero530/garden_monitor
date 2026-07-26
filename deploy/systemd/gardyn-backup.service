@@ -1,0 +1,17 @@
+# Install to /etc/systemd/system/gardyn-backup.service
+#
+# A plain systemd service, not a Quadlet: it runs a script on the host, not a
+# container.
+
+[Unit]
+Description=Back up the Gardyn database
+Documentation=https://www.sqlite.org/lang_vacuum.html#vacuuminto
+# No point running while the disk is unreachable.
+RequiresMountsFor=/var/lib/gardyn
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gardyn-backup
+# The backup is not urgent and should never compete with the server for I/O.
+Nice=10
+IOSchedulingClass=idle

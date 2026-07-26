@@ -21,6 +21,29 @@ Phases 0 through 5 run the agent **alongside** the factory firmware, read-only. 
 Gardyn keeps watering and lighting itself exactly as before, and the worst case is
 that our agent crashes and you get no telemetry.
 
+```mermaid
+flowchart TD
+  p0["<b>Phase 0</b> — recon<br/><small>image the card, get a shell, inventory</small>"]
+  p1["<b>Phase 1</b> — read-only telemetry<br/><small>+ PWM parity capture, 1–2 weeks</small>"]
+  p5["<b>Phase 5</b> — water probe<br/><small>DS18B20, $5</small>"]
+  p6["<b>Phase 6</b> — firmware takeover<br/><small>own the lights and pump</small>"]
+  roll{{"rollback:<br/>swap the original card back"}}
+
+  p0 --> p1 --> p5 --> p6
+  p0 -.-> roll
+  p1 -.-> roll
+  p5 -.-> roll
+  p6 -.->|"only if you did step 0.2"| roll
+
+  classDef safe fill:#2f7d4f22,stroke:#2f7d4f
+  classDef risk fill:#b3401a22,stroke:#b3401a
+  class p0,p1,p5 safe
+  class p6 risk
+```
+
+Green phases never touch an actuator. Phase 6 is the one that can kill plants, and it
+is deliberately last.
+
 ---
 
 ## Phase 0 — recon
@@ -280,14 +303,43 @@ dissolved-oxygen and root-rot reasoning that nothing else can.
 
 **DS18B20 waterproof, 3-wire:**
 
-| Wire | Pi pin |
-|---|---|
-| Red (VDD) | 3.3 V — pin 1 |
-| Black (GND) | GND — pin 6 |
-| Yellow (DATA) | GPIO4 — pin 7 |
+| Wire | Pi header pin | Signal |
+|---|---|---|
+| Red (VDD) | **1** | 3.3 V |
+| Black (GND) | **6** | GND |
+| Yellow (DATA) | **7** | GPIO4 |
 
-A **4.7 kΩ resistor between DATA and 3.3 V** is required. Without it the bus reads
-nothing at all, and it is the single most common reason a DS18B20 "does not work".
+```mermaid
+flowchart LR
+  subgraph header["Pi 40-pin header"]
+    direction TB
+    p1(["pin 1 · 3.3 V"])
+    p7(["pin 7 · GPIO4"])
+    p6(["pin 6 · GND"])
+  end
+
+  subgraph probe["DS18B20 · waterproof"]
+    direction TB
+    vdd(["red · VDD"])
+    data(["yellow · DATA"])
+    gnd(["black · GND"])
+  end
+
+  r{{"4.7 kΩ<br/>pull-up"}}
+
+  p1 --- vdd
+  p7 --- data
+  p6 --- gnd
+  p1 --- r
+  r --- p7
+
+  style r fill:#a2620f22,stroke:#a2620f,stroke-width:2px
+```
+
+The **4.7 kΩ resistor between DATA and 3.3 V is required, not optional.** 1-Wire is an
+open-drain bus: with no pull-up the line never returns high and the kernel sees no
+device at all. This is the single most common reason a DS18B20 "does not work", and the
+symptom — nothing in `/sys/bus/w1/devices/` — looks identical to a wiring mistake.
 
 ```sh
 echo "dtoverlay=w1-gpio,gpiopin=4" | sudo tee -a /boot/firmware/config.txt
@@ -453,8 +505,11 @@ Honest list, so you do not go looking:
 - **`gardyn-vision`.** Frames are captured, stored and displayed, but no canopy metrics
   are extracted from real images yet — the `CanopyMetrics` capability is only produced
   by the simulator.
-- **`gardyn-notify`.** Tasks appear in the web UI; ntfy, email and the iCal feed are
-  specified in DESIGN.md §10 but not written. **Nothing will reach your phone yet.**
-- **`gardyn-cli`.** Tank calibration is still the placeholder constants in
-  `TankGeometry::STUDIO_2`; water level will read wrong until they are measured.
+- **Tank calibration.** `TankGeometry::STUDIO_2` still holds placeholder distances, so
+  water level will read wrong until they are measured against the real device. They are
+  data, not logic — correcting them is a value change.
 - **MQTT.** Topics are declared in `gardyn-proto`; the transport is HTTP.
+
+`gardyn-notify` **is** built — push, email and the iCal feed all work. Setting them up
+is [NOTIFICATIONS.md](NOTIFICATIONS.md); the server side is
+[DEPLOYMENT.md](DEPLOYMENT.md).
