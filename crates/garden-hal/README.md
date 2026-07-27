@@ -94,8 +94,14 @@ turns canopy colour into a usable signal.
 The light is restored **even if the capture fails**, because the alternative is leaving
 the garden at 80% overnight because a USB camera timed out.
 
-`Frame::light_duty_milli` records the level each frame was taken at, so the brain can
-badge non-comparable frames as *ambient* rather than silently mixing them into a trend.
+`Frame::light_duty_milli` records the level each frame was taken at, and `photo_mode`
+stamps it from the reference it just pinned rather than trusting the camera — a camera
+reports pixels, not what the room was lit at. The brain uses it to badge non-comparable
+frames as *ambient* rather than silently mixing them into a trend.
+
+`PHOTO_REFERENCE` is that level: one constant, the same every time, which is the entire
+point. It matches the failsafe's daylight duty so taking a photograph does not visibly
+change the room.
 
 ---
 

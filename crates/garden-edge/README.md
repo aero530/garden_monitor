@@ -179,6 +179,21 @@ hardware should be asked to run.
 `/run/garden/guard.engaged`, and the agent stands down until that file disappears.
 Nothing here can exceed the 30% pump ceiling, because every duty goes through `Duty`.
 
+Owning the lights also unlocks **photo mode**. Every hourly capture pins the bar to a
+single reference level, shoots, and puts the operating level back — which is what makes
+two frames comparable by colour. Without it, brightness varies with the time of day and
+a chlorosis trend measures the clock rather than the plant.
+
+Two conditions, and the second is the one worth stating: the agent must own the
+actuators, **and the schedule must already have the lights on**. Driving the bar to 80%
+at two in the morning for a photograph would wake the garden for the sake of a
+measurement, so dark-hours captures stay ambient and are labelled as such. If the
+failsafe holds the pins, pinning is refused and the frame is honestly marked ambient
+rather than claimed comparable.
+
+`--photo-settle-ms` (default 600) is the pause between pinning and the shutter. The
+LEDs settle instantly; the camera's auto-exposure does not.
+
 ---
 
 ## Sensor connections
@@ -301,5 +316,6 @@ Enable `--features tls` only if you are reaching the brain over public HTTPS, an
 | `GARDEN_OWN_ACTUATORS` | `false` | **Phase 6.** Drive the lights and pump |
 | `GARDEN_HEARTBEAT` | `/run/garden/edge.heartbeat` | what keeps the failsafe asleep |
 | `GARDEN_GUARD_MARKER` | `/run/garden/guard.engaged` | watched, to know when to stand down |
+| `GARDEN_PHOTO_SETTLE_MS` | `600` | pause between pinning the lights and the shutter |
 
 Installation as a systemd service is [HARDWARE.md §1.3](../../HARDWARE.md).

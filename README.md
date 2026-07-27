@@ -192,9 +192,10 @@ Four things this gets right that a static file mount would not:
 
 `X-Photo-Mode` matters more than it looks. Under the Studio 2's sunrise/sunset ramp,
 brightness varies with capture time, so colour comparisons between frames measure the
-clock rather than the plant. Frames captured at the pinned reference level are marked
-comparable; the rest are badged **ambient** in the UI and should be kept out of any
-colour trend.
+clock rather than the plant. An agent that owns the actuators pins the light bar to one
+reference level for the shot and restores it afterwards; those frames are marked
+comparable. Everything else — a read-only agent, the dark hours, or the failsafe
+holding the pins — is badged **ambient** in the UI and kept out of any colour trend.
 
 The simulation reports what the rule set achieves against operators of varying
 diligence, and what each piece of optional hardware is worth:

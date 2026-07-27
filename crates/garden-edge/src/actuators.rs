@@ -336,3 +336,125 @@ mod tests {
         let _ = m.release();
     }
 }
+
+/// So `garden_hal::photo_mode` can drive these pins directly.
+///
+/// The arbitration still applies: if the failsafe has taken the pins, `set_light`
+/// refuses rather than fighting it. `photo_mode` then fails, and the caller falls back
+/// to an ambient capture — which is right, because a frame taken while we could not
+/// control the lights must not be labelled comparable.
+impl garden_hal::Actuators for OwnedActuators {
+    fn set_light(&mut self, duty: Duty) -> garden_hal::Result<()> {
+        if self.marker.engaged() {
+            return Err(garden_hal::HalError::Actuator(
+                "the failsafe currently owns the pins".into(),
+            ));
+        }
+        self.driver
+            .set_light(duty)
+            .map_err(|e| garden_hal::HalError::Actuator(e.to_string()))?;
+        // The cached setpoint no longer describes the pins.
+        self.applied = None;
+        Ok(())
+    }
+
+    fn set_pump(&mut self, duty: Duty) -> garden_hal::Result<()> {
+        if self.marker.engaged() {
+            return Err(garden_hal::HalError::Actuator(
+                "the failsafe currently owns the pins".into(),
+            ));
+        }
+        self.driver
+            .set_pump(duty)
+            .map_err(|e| garden_hal::HalError::Actuator(e.to_string()))?;
+        self.applied = None;
+        Ok(())
+    }
+
+    fn light(&self) -> Duty {
+        self.driver.light()
+    }
+
+    fn pump(&self) -> Duty {
+        self.driver.pump()
+    }
+}
+
+#[cfg(test)]
+mod photo_tests {
+    use super::*;
+    use garden_hal::{Actuators as _, Schedule};
+
+    fn marker(name: &str) -> GuardMarker {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        GuardMarker::new(std::env::temp_dir().join(format!("garden-photo-{name}-{nanos}")))
+    }
+
+    #[test]
+    fn pinning_the_light_invalidates_the_cached_setpoint() {
+        // photo_mode moves the pins behind `apply`'s back. Without invalidating, the
+        // next tick would see an unchanged setpoint and skip the write, leaving the
+        // garden at the photograph's brightness.
+        let m = marker("invalidate");
+        let mut actuators = OwnedActuators::open(m.clone()).unwrap();
+        let day = Schedule::DEFAULT.setpoint(12 * 3600);
+
+        assert_eq!(actuators.apply(day).unwrap(), Applied::Changed);
+        assert_eq!(actuators.apply(day).unwrap(), Applied::Unchanged);
+
+        actuators.set_light(garden_hal::PHOTO_REFERENCE).unwrap();
+        assert_eq!(
+            actuators.apply(day).unwrap(),
+            Applied::Changed,
+            "the schedule must be reasserted after a photograph"
+        );
+        let _ = m.release();
+    }
+
+    #[test]
+    fn the_failsafe_holding_the_pins_refuses_the_pin() {
+        let m = marker("refuse");
+        let mut actuators = OwnedActuators::open(m.clone()).unwrap();
+        m.engage().unwrap();
+
+        assert!(actuators.set_light(garden_hal::PHOTO_REFERENCE).is_err());
+        assert!(actuators.set_pump(Duty::OFF).is_err());
+        let _ = m.release();
+    }
+
+    #[test]
+    fn photo_mode_over_these_pins_restores_the_schedule_level() {
+        let m = marker("restore");
+        let mut actuators = OwnedActuators::open(m.clone()).unwrap();
+        let day = Schedule::DEFAULT.setpoint(12 * 3600);
+        actuators.apply(day).unwrap();
+
+        struct Cam;
+        impl garden_hal::Camera for Cam {
+            fn capture(&mut self) -> garden_hal::Result<garden_hal::Frame> {
+                Ok(garden_hal::Frame {
+                    captured_at: garden_core::Timestamp::from_second(0).unwrap(),
+                    width: 1,
+                    height: 1,
+                    data: vec![0],
+                    light_duty_milli: 0,
+                })
+            }
+        }
+
+        let frame =
+            garden_hal::photo_mode(&mut actuators, &mut Cam, garden_hal::PHOTO_REFERENCE, || {})
+                .unwrap();
+
+        assert_eq!(frame.light_duty_milli, garden_hal::PHOTO_REFERENCE.milli());
+        assert_eq!(
+            actuators.light(),
+            day.light,
+            "the schedule's level must be back once the shutter closes"
+        );
+        let _ = m.release();
+    }
+}

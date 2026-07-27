@@ -95,6 +95,20 @@ impl Duty {
     pub fn percent(self) -> f32 {
         self.0 * 100.0
     }
+
+    /// Duty in thousandths, which is how a frame records the light it was shot under.
+    pub fn milli(self) -> u16 {
+        (self.0 * 1000.0).round().clamp(0.0, 1000.0) as u16
+    }
+
+    /// A duty from a whole percentage, usable in a `const`.
+    ///
+    /// `Duty::new` clamps at runtime and cannot be const because of the NaN check;
+    /// this takes an integer percentage, which has no NaN to worry about.
+    pub const fn from_percent_const(percent: u8) -> Self {
+        let clamped = if percent > 100 { 100 } else { percent };
+        Duty(clamped as f32 / 100.0)
+    }
 }
 
 /// Reads every fitted sensor in one pass.
@@ -151,8 +165,24 @@ pub fn photo_mode<A: Actuators, C: Camera>(
     let frame = camera.capture();
     // Restore the operating light level even if the capture failed.
     actuators.set_light(restore)?;
-    frame
+
+    // Stamp the level actually pinned. This function is the only code that knows it
+    // for certain — a camera reports pixels, not what the room was lit at — and
+    // leaving the caller to remember is how a frame ends up labelled with the wrong
+    // brightness and silently poisons a colour trend.
+    frame.map(|mut frame| {
+        frame.light_duty_milli = reference.milli();
+        frame
+    })
 }
+
+/// The level every pinned capture is taken at.
+///
+/// One constant, and the same every time, which is the entire point: comparing the
+/// colour of two frames only means anything if they were lit identically. Chosen to
+/// match the failsafe's daylight level so a photograph does not visibly change the
+/// room.
+pub const PHOTO_REFERENCE: Duty = Duty::from_percent_const(80);
 
 #[cfg(test)]
 mod tests {
@@ -264,5 +294,94 @@ mod tests {
         assert!(result.is_err());
         // A failed capture must not strand the garden at the reference brightness.
         assert_eq!(act.light(), Duty::new(0.62));
+    }
+}
+
+#[cfg(test)]
+mod photo_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    struct Act {
+        light: Duty,
+        refused: bool,
+    }
+
+    impl Actuators for Act {
+        fn set_light(&mut self, duty: Duty) -> Result<()> {
+            if self.refused {
+                return Err(HalError::Actuator("the failsafe owns the pins".into()));
+            }
+            self.light = duty;
+            Ok(())
+        }
+        fn set_pump(&mut self, _: Duty) -> Result<()> {
+            Ok(())
+        }
+        fn light(&self) -> Duty {
+            self.light
+        }
+        fn pump(&self) -> Duty {
+            Duty::OFF
+        }
+    }
+
+    struct Cam {
+        seen: Cell<u16>,
+    }
+
+    impl Camera for Cam {
+        fn capture(&mut self) -> Result<Frame> {
+            Ok(Frame {
+                captured_at: Timestamp::from_second(0).unwrap(),
+                width: 4,
+                height: 4,
+                data: vec![0; 16],
+                // Deliberately wrong, to prove `photo_mode` overwrites it: a camera
+                // reports pixels, not what the room was lit at.
+                light_duty_milli: self.seen.get(),
+            })
+        }
+    }
+
+    #[test]
+    fn the_frame_records_the_level_it_was_actually_pinned_at() {
+        let mut act = Act {
+            light: Duty::new(0.62),
+            refused: false,
+        };
+        let mut cam = Cam { seen: Cell::new(1) };
+
+        let frame = photo_mode(&mut act, &mut cam, PHOTO_REFERENCE, || {}).unwrap();
+        assert_eq!(frame.light_duty_milli, 800, "the reference, not the camera's guess");
+        assert_eq!(act.light(), Duty::new(0.62), "and the operating level is back");
+    }
+
+    #[test]
+    fn a_refused_pin_fails_rather_than_taking_an_unlit_photograph() {
+        // If the failsafe has the pins, we cannot guarantee the light level, so the
+        // frame must not be labelled comparable. Failing lets the caller fall back to
+        // an honest ambient capture.
+        let mut act = Act {
+            light: Duty::new(0.62),
+            refused: true,
+        };
+        let mut cam = Cam { seen: Cell::new(0) };
+        assert!(photo_mode(&mut act, &mut cam, PHOTO_REFERENCE, || {}).is_err());
+    }
+
+    #[test]
+    fn the_reference_is_a_round_number_and_inside_range() {
+        assert_eq!(PHOTO_REFERENCE.milli(), 800);
+        assert!(PHOTO_REFERENCE.get() > 0.0 && PHOTO_REFERENCE.get() <= 1.0);
+    }
+
+    #[test]
+    fn milli_rounds_rather_than_truncates() {
+        // 0.2999 is 300 thousandths, not 299. Truncating would make two identical
+        // captures differ by one unit and look like a light change.
+        assert_eq!(Duty::new(0.2999).milli(), 300);
+        assert_eq!(Duty::new(0.0).milli(), 0);
+        assert_eq!(Duty::FULL.milli(), 1000);
     }
 }

@@ -102,6 +102,14 @@ enum Command {
         )]
         guard_marker: PathBuf,
 
+        /// Milliseconds to wait after pinning the lights before the shutter.
+        ///
+        /// The LEDs settle almost instantly; the camera's auto-exposure does not, and
+        /// a frame taken too early is darker than the one before it for no reason the
+        /// plant is responsible for.
+        #[arg(long, env = "GARDEN_PHOTO_SETTLE_MS", default_value_t = 600)]
+        photo_settle_ms: u64,
+
         /// File touched every tick, which is what tells the guard we are alive.
         #[arg(
             long,
@@ -281,6 +289,7 @@ async fn async_main(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             own_actuators,
             guard_marker,
             heartbeat,
+            photo_settle_ms,
         } => {
             run_daemon(
                 client,
@@ -291,6 +300,7 @@ async fn async_main(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     own_actuators,
                     guard_marker,
                     heartbeat,
+                    photo_settle: Duration::from_millis(photo_settle_ms),
                 },
             )
             .await?
@@ -305,6 +315,80 @@ struct DaemonControl {
     own_actuators: bool,
     guard_marker: PathBuf,
     heartbeat: PathBuf,
+    photo_settle: Duration,
+}
+
+/// One photograph, and what is known about the light it was taken under.
+struct Shot {
+    bytes: Vec<u8>,
+    captured_at: Timestamp,
+    width: u32,
+    height: u32,
+    /// `None` when we do not own the lights and therefore cannot know.
+    light_duty_milli: Option<i64>,
+    /// Whether this frame can be compared with others by colour.
+    comparable: bool,
+}
+
+/// Whether a capture at this moment should pin the lights to the reference level.
+///
+/// Two conditions, and the second is the interesting one. Owning the actuators is
+/// necessary but not sufficient: driving the bar to 80% at two in the morning to take
+/// a photograph would wake the garden for the sake of a measurement, which is a worse
+/// trade than an ambient frame. So a pinned capture only happens during the hours the
+/// schedule already has the lights on.
+fn should_pin(owns_actuators: bool, schedule: &Schedule, seconds_since_midnight: u32) -> bool {
+    owns_actuators && !schedule.setpoint(seconds_since_midnight).light.is_off()
+}
+
+/// Take a photograph, pinning the lights when that is both possible and appropriate.
+///
+/// Falls back to an ambient capture whenever pinning is refused — the failsafe holding
+/// the pins, say. A frame taken while the light level was not under our control must
+/// not be labelled comparable, because the whole value of that flag is that a colour
+/// difference between two comparable frames is the plant changing rather than the
+/// lighting.
+fn take_shot(
+    actuators: Option<&mut actuators::OwnedActuators>,
+    schedule: &Schedule,
+    seconds_since_midnight: u32,
+    settle: Duration,
+) -> Result<Shot, camera::CameraError> {
+    if let Some(driver) = actuators
+        && should_pin(true, schedule, seconds_since_midnight)
+    {
+        match garden_hal::photo_mode(
+            driver,
+            &mut camera::HalCamera,
+            garden_hal::PHOTO_REFERENCE,
+            || std::thread::sleep(settle),
+        ) {
+            Ok(frame) => {
+                return Ok(Shot {
+                    bytes: frame.data,
+                    captured_at: frame.captured_at,
+                    width: frame.width,
+                    height: frame.height,
+                    light_duty_milli: Some(i64::from(frame.light_duty_milli)),
+                    comparable: true,
+                });
+            }
+            Err(error) => tracing::warn!(
+                %error,
+                "could not pin the lights; taking an ambient frame instead"
+            ),
+        }
+    }
+
+    let frame = camera::capture()?;
+    Ok(Shot {
+        bytes: frame.bytes,
+        captured_at: frame.captured_at,
+        width: frame.width,
+        height: frame.height,
+        light_duty_milli: None,
+        comparable: false,
+    })
 }
 
 /// Touch the heartbeat file. This is the only thing keeping the failsafe asleep.
@@ -459,16 +543,20 @@ async fn run_daemon(
 
         if frame_seconds > 0 && since_frame >= Duration::from_secs(frame_seconds) {
             since_frame = Duration::ZERO;
-            match camera::capture() {
-                Ok(frame) => {
+            let seconds = seconds_since_local_midnight(now);
+            match take_shot(actuators.as_mut(), &schedule, seconds, control.photo_settle) {
+                Ok(shot) => {
+                    if shot.comparable {
+                        tracing::debug!(light = shot.light_duty_milli, "pinned capture");
+                    }
                     if let Err(e) = client
                         .upload_frame(
-                            frame.bytes,
-                            frame.captured_at,
-                            frame.width,
-                            frame.height,
-                            None,
-                            false,
+                            shot.bytes,
+                            shot.captured_at,
+                            shot.width,
+                            shot.height,
+                            shot.light_duty_milli,
+                            shot.comparable,
                         )
                         .await
                     {
@@ -483,5 +571,62 @@ async fn run_daemon(
 
         tokio::time::sleep(sample_interval).await;
         since_frame += sample_interval;
+    }
+}
+
+#[cfg(test)]
+mod photo_tests {
+    use super::*;
+
+    const HOUR: u32 = 3600;
+
+    #[test]
+    fn a_read_only_agent_never_pins() {
+        // Phases 0-5 run alongside the factory firmware, which owns the lights. Pinning
+        // them would be two processes fighting over one PWM line.
+        let day = Schedule::DEFAULT;
+        for hour in 0..24 {
+            assert!(!should_pin(false, &day, hour * HOUR), "hour {hour}");
+        }
+    }
+
+    #[test]
+    fn a_daytime_capture_pins_and_a_night_one_does_not() {
+        // Driving the bar to 80% at two in the morning to take a photograph would wake
+        // the garden for the sake of a measurement. An ambient frame is the better
+        // trade, and it is honestly labelled.
+        let s = Schedule::DEFAULT; // 06:00, 16 hours, so dark from 22:00.
+        assert!(should_pin(true, &s, 12 * HOUR), "midday");
+        assert!(should_pin(true, &s, 20 * HOUR), "evening, still lit");
+        assert!(!should_pin(true, &s, 2 * HOUR), "the small hours");
+        assert!(!should_pin(true, &s, 23 * HOUR), "after lights out");
+    }
+
+    #[test]
+    fn the_dawn_ramp_counts_as_lit() {
+        // Part-way up the ramp the lights are on, just not at full. Pinning takes them
+        // to the reference and back, so the ramp is not a reason to skip.
+        let s = Schedule::DEFAULT;
+        assert!(should_pin(true, &s, 6 * HOUR + 900), "fifteen minutes into dawn");
+        assert!(!should_pin(true, &s, 6 * HOUR - 60), "a minute before it starts");
+    }
+
+    #[test]
+    fn a_schedule_with_no_light_at_all_never_pins() {
+        let dark = Schedule {
+            light_hours: 0.0,
+            ..Schedule::DEFAULT
+        };
+        for hour in 0..24 {
+            assert!(!should_pin(true, &dark, hour * HOUR), "hour {hour}");
+        }
+    }
+
+    #[test]
+    fn an_agent_that_owns_no_actuators_takes_an_ambient_frame() {
+        // No pins, so no capture tool is invoked on a desktop either — this asserts the
+        // decision, which is the part that has to be right.
+        let s = Schedule::DEFAULT;
+        assert!(!should_pin(false, &s, 12 * HOUR));
     }
 }

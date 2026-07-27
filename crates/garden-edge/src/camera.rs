@@ -134,6 +134,27 @@ pub fn capture() -> Result<Frame, CameraError> {
     Err(last_error.unwrap_or(CameraError::NoTool))
 }
 
+/// Adapts this module to `garden_hal::Camera`, so `garden_hal::photo_mode` can drive
+/// the capture directly rather than the pinning logic being written out again here.
+///
+/// `light_duty_milli` is left at zero: this shells out to a capture tool and has no
+/// idea what the room was lit at. `photo_mode` stamps the level it pinned, which is the
+/// only place that knows for certain.
+pub struct HalCamera;
+
+impl garden_hal::Camera for HalCamera {
+    fn capture(&mut self) -> garden_hal::Result<garden_hal::Frame> {
+        let frame = capture().map_err(|e| garden_hal::HalError::Camera(e.to_string()))?;
+        Ok(garden_hal::Frame {
+            captured_at: frame.captured_at,
+            width: frame.width,
+            height: frame.height,
+            data: frame.bytes,
+            light_duty_milli: 0,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
