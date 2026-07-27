@@ -7,6 +7,7 @@
 mod api;
 mod app;
 mod demo;
+mod diagnose;
 mod dispatch;
 mod error;
 mod pages;
@@ -78,6 +79,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     dispatch::spawn(state.clone());
     retention::spawn(state.clone());
+    // Off unless GARDEN_OLLAMA_URL points at a container. Advisory either way: it
+    // writes a sentence and no rule reads it.
+    match diagnose::from_env() {
+        Some(backend) => diagnose::spawn(state.clone(), backend),
+        None => tracing::info!("visual diagnosis is off — set GARDEN_OLLAMA_URL to enable"),
+    }
 
     let router = router(state);
 

@@ -15,7 +15,7 @@ garden-proto.workspace = true
 garden-rules.workspace = true
 garden-sim.workspace = true
 garden-store.workspace = true
-garden-vision.workspace = true
+garden-vision = { workspace = true, features = ["diagnosis"] }
 jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true

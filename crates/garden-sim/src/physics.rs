@@ -304,7 +304,7 @@ pub fn observe(state: &mut GardenState, plants: &[PlantSim], rng: &mut Lcg, env:
             .days_since_germination(state.now)
             .unwrap_or(0.0)
             .max(1.0);
-        metrics.growth_rate_cm2_per_day = (area / age as f32).max(0.0);
+        metrics.growth_rate_cm2_per_day = Some((area / age as f32).max(0.0));
 
         state.slot_metrics.insert(plant.slot, metrics);
     }

@@ -249,7 +249,7 @@ pub fn apply_growth(
             area_cm2: metrics.canopy_area_cm2,
         });
         if let Some(rate) = growth::fit_rate(&recent) {
-            metrics.growth_rate_cm2_per_day = rate;
+            metrics.growth_rate_cm2_per_day = Some(rate);
         }
     }
 }
@@ -406,7 +406,7 @@ mod tests {
         let mut report = Analyzer::new(map.clone())
             .analyse_image(&tower(&map, &[0], 0.5), t0())
             .unwrap();
-        assert_eq!(report.slots[0].growth_rate_cm2_per_day, 0.0);
+        assert_eq!(report.slots[0].growth_rate_cm2_per_day, None);
 
         let mut history = BTreeMap::new();
         history.insert(
@@ -427,7 +427,7 @@ mod tests {
             ],
         );
         apply_growth(&mut report, &history, t0());
-        assert!(report.slots[0].growth_rate_cm2_per_day > 5.0);
+        assert!(report.slots[0].growth_rate_cm2_per_day.unwrap() > 5.0);
     }
 
     #[test]

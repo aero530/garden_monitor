@@ -246,14 +246,15 @@ fn measured(snapshot: &GardenState, slot: SlotId) -> Markup {
                     (format!("{:.0}% yellow", m.yellowing_index * 100.0))
                 }
             }
-            // Growth is only worth showing once it is a fitted rate rather than the
-            // zero a single frame leaves behind.
-            @if m.growth_rate_cm2_per_day.abs() > 0.05 {
+            // Absent until there is enough history to fit a line. Showing "stalled"
+            // for a slot that has simply not been watched long enough would be the
+            // system reporting its own ignorance as a symptom.
+            @if let Some(rate) = m.growth_rate_cm2_per_day {
                 @if m.is_stalled() {
                     span.sev-advisory title="canopy is not expanding" { "stalled" }
                 } @else {
                     span title="fitted over the last ten days" {
-                        (format!("+{:.0} cm²/day", m.growth_rate_cm2_per_day))
+                        (format!("+{rate:.0} cm²/day"))
                     }
                 }
             }

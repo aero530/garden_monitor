@@ -304,6 +304,22 @@ impl Store {
     }
 
     /// Recent frames, newest first.
+    /// The newest frame shot under pinned lights.
+    ///
+    /// Anything else was taken at whatever brightness the room happened to be, so its
+    /// colour is not comparable and a model asked "does this look chlorotic" would be
+    /// answering about the lighting.
+    pub async fn latest_comparable_frame(&self, garden: GardenId) -> Result<Option<Frame>> {
+        let row = sqlx::query(
+            "SELECT * FROM frames WHERE garden_id = ?1 AND comparable = 1
+             ORDER BY captured_at DESC LIMIT 1",
+        )
+        .bind(garden.to_string())
+        .fetch_optional(&self.db)
+        .await?;
+        row.as_ref().map(frame_from_row).transpose()
+    }
+
     pub async fn recent_frames(&self, garden: GardenId, limit: i64) -> Result<Vec<Frame>> {
         let rows = sqlx::query(
             "SELECT * FROM frames WHERE garden_id = ?1 ORDER BY captured_at DESC LIMIT ?2",

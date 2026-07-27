@@ -241,7 +241,7 @@ mod tests {
         let latest = store.latest_slot_metrics(garden).await.unwrap();
         let slot = latest.iter().find(|m| m.slot == SlotId(3)).unwrap();
         assert!(
-            slot.growth_rate_cm2_per_day > 1.0,
+            slot.growth_rate_cm2_per_day.is_some_and(|rate| rate > 1.0),
             "expected measured growth, got {slot:?}"
         );
         assert!(!slot.is_stalled());

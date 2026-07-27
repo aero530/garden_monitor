@@ -23,7 +23,12 @@ pub struct SlotMetrics {
     pub yellowing_index: f32,
     /// Fitted growth rate over the recent window. Negative means the plant is losing
     /// canopy, which is a stronger distress signal than any absolute measure.
-    pub growth_rate_cm2_per_day: f32,
+    ///
+    /// `None` until there is enough history to fit a line — three measurements spread
+    /// over more than a day. Deliberately not zero: zero is what a genuinely stalled
+    /// plant looks like, and conflating the two means every slot reads as stalled for
+    /// its first few days of being watched.
+    pub growth_rate_cm2_per_day: Option<f32>,
 
     // --- Capability::PlantSegmentation (ONNX) -----------------------------------
     /// Distinct seedlings detected, used to drive thinning.
@@ -43,7 +48,7 @@ impl SlotMetrics {
             canopy_area_cm2,
             green_fraction: 0.0,
             yellowing_index: 0.0,
-            growth_rate_cm2_per_day: 0.0,
+            growth_rate_cm2_per_day: None,
             plant_count: None,
             flowering: None,
             diagnosis: None,
@@ -52,8 +57,17 @@ impl SlotMetrics {
 
     /// Canopy has stopped expanding, suggesting the plant is stressed, root-bound, or
     /// simply finished.
+    ///
+    /// False when the rate has not been fitted yet. "We cannot tell" is not "it has
+    /// stopped", and treating it as such would flag every newly-watched plant.
     pub fn is_stalled(&self) -> bool {
-        self.growth_rate_cm2_per_day < Self::STALL_THRESHOLD
+        self.growth_rate_cm2_per_day
+            .is_some_and(|rate| rate < Self::STALL_THRESHOLD)
+    }
+
+    /// Whether enough history exists to say anything about growth at all.
+    pub fn growth_is_known(&self) -> bool {
+        self.growth_rate_cm2_per_day.is_some()
     }
 
     pub fn is_chlorotic(&self) -> bool {
@@ -137,10 +151,26 @@ mod tests {
     #[test]
     fn shrinking_canopy_counts_as_stalled() {
         let mut m = SlotMetrics::new(SlotId(0), t0(), 300.0);
-        m.growth_rate_cm2_per_day = 4.0;
+        m.growth_rate_cm2_per_day = Some(4.0);
         assert!(!m.is_stalled());
-        m.growth_rate_cm2_per_day = -2.0;
+        m.growth_rate_cm2_per_day = Some(-2.0);
         assert!(m.is_stalled());
+    }
+
+    #[test]
+    fn an_unfitted_rate_is_not_a_stall() {
+        // The distinction this Option exists for. A slot measured for the first time
+        // has no fitted rate, and reading that as "stopped growing" would flag every
+        // plant in a newly-calibrated garden.
+        let fresh = SlotMetrics::new(SlotId(0), t0(), 300.0);
+        assert!(!fresh.growth_is_known());
+        assert!(!fresh.is_stalled());
+
+        // ...whereas a fitted rate of zero really is a stall.
+        let mut measured = fresh.clone();
+        measured.growth_rate_cm2_per_day = Some(0.0);
+        assert!(measured.growth_is_known());
+        assert!(measured.is_stalled());
     }
 
     #[test]

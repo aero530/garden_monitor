@@ -494,9 +494,30 @@ sudo systemctl enable --now garden-ollama
 sudo podman exec -it systemd-garden-ollama ollama pull qwen2.5vl:7b
 ```
 
-The brain finds it at `http://garden-ollama:11434`. It is advisory only — deterministic
-rules own anything that touches dosing, water, or an actuator, so a model that invents a
-nutrient deficiency cannot act on it.
+Then point the brain at it, in `/etc/garden/web.env`:
+
+```sh
+GARDEN_OLLAMA_URL=http://garden-ollama:11434
+GARDEN_OLLAMA_MODEL=qwen2.5vl:7b
+```
+
+```sh
+sudo systemctl restart garden-web
+```
+
+Unset means off, and the brain says so at startup. Once on, a daily pass looks at
+**only the slots the deterministic rules have already flagged** — stalled or yellowing —
+and at most four per garden. Running a model over sixteen healthy plants a day would be
+waste, and the framing matters: this is a second opinion on a plant something else
+suspected, not a survey.
+
+It reads only frames taken in photo mode. An ambient frame was shot at whatever
+brightness the room happened to be, so asking whether the leaves look pale would be
+asking about the lighting.
+
+Advisory only — deterministic rules own anything that touches dosing, water, or an
+actuator, so a model that invents a nutrient deficiency cannot act on it. That is
+enforced by a test asserting no rule reads the field, not by discipline.
 
 ---
 

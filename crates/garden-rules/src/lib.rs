@@ -224,3 +224,92 @@ mod tests {
         assert!(eval.tasks.is_empty(), "unexpected: {:?}", eval.tasks);
     }
 }
+
+#[cfg(test)]
+mod advisory_only {
+    //! The guarantee that a language model cannot dose the tank.
+    //!
+    //! `SlotMetrics::diagnosis` is free text written by a vision model. Deterministic
+    //! rules own everything that touches water, nutrients or an actuator, and the way
+    //! that is enforced is simply that no rule reads the field. Which is easy to
+    //! believe today and easy to break in six months, so it is a test.
+
+    use garden_core::{GardenState, SlotMetrics, Timestamp};
+
+    fn t0() -> Timestamp {
+        Timestamp::from_second(1_700_000_000).unwrap()
+    }
+
+    #[test]
+    fn no_rule_changes_its_mind_because_of_a_diagnosis() {
+        // The same garden evaluated twice: once with every slot undiagnosed, once with
+        // an alarming sentence attached to each. If any task differs, something is
+        // reading it.
+        let mut plain = GardenState::new_studio_2(t0());
+        for slot in plain.geometry.slots() {
+            let mut metrics = SlotMetrics::new(slot, t0(), 250.0);
+            metrics.green_fraction = 0.7;
+            metrics.plant_count = Some(2);
+            plain.slot_metrics.insert(slot, metrics);
+        }
+        plain.capabilities.insert(garden_core::Capability::CanopyMetrics);
+
+        let mut diagnosed = plain.clone();
+        for metrics in diagnosed.slot_metrics.values_mut() {
+            metrics.diagnosis = Some(
+                "Severe nitrogen deficiency and spider mites. Dose immediately and \
+                 refresh the tank."
+                    .into(),
+            );
+        }
+        diagnosed
+            .capabilities
+            .insert(garden_core::Capability::VisualDiagnosis);
+
+        let engine = super::default_engine();
+        let before = engine.evaluate(&plain);
+        let after = engine.evaluate(&diagnosed);
+
+        let keys = |e: &super::Evaluation| -> Vec<String> {
+            let mut k: Vec<String> = e.tasks.iter().map(|t| t.key.0.clone()).collect();
+            k.sort();
+            k
+        };
+        assert_eq!(
+            keys(&before),
+            keys(&after),
+            "a rule is reading SlotMetrics::diagnosis — it must not, because that text \
+             comes from a language model and these tasks dose the tank"
+        );
+
+        // ...and the wording is untouched too, so nothing is quoting it into advice.
+        for (a, b) in before.tasks.iter().zip(after.tasks.iter()) {
+            assert_eq!(a.rationale, b.rationale, "a rationale quotes the diagnosis");
+            assert_eq!(a.severity, b.severity, "a severity moved on model output");
+        }
+    }
+
+    #[test]
+    fn the_field_is_not_mentioned_anywhere_in_this_crate() {
+        // Belt to the braces above: the behavioural test only covers states it happens
+        // to construct. This covers the source.
+        let sources = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))
+            .expect("the crate's own source");
+        for entry in sources.flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            // This file names it, in these tests, which is the point.
+            if path.file_name().is_some_and(|n| n == "lib.rs") {
+                continue;
+            }
+            assert!(
+                !text.contains("diagnosis"),
+                "{} mentions `diagnosis`; rules must not read model output",
+                path.display()
+            );
+        }
+    }
+}

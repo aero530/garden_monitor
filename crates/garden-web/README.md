@@ -81,6 +81,7 @@ Three constants shape the experience more than any of the code around them:
 |---|---|---|
 | `TICK` | 300 s | how often the world is re-evaluated |
 | `retention::INTERVAL` | 24 h | pruning, on its own loop — see below |
+| `diagnose::INTERVAL` | 24 h | visual diagnosis, off unless configured |
 | `MAX_BURST` | **3** | interrupting notifications per garden per sweep |
 | `BRIEF_HOUR` | 8 | local hour the daily digest goes out |
 
@@ -181,6 +182,14 @@ lights just changed. An invalid schedule is refused with the values still in the
 rather than clamped — a silently adjusted one would leave the operator believing the
 garden runs what they typed.
 
+**Visual diagnosis is a third loop, and off unless pointed at a model.** Not on frame
+upload, because a 7B model on CPU takes a minute or two and the agent's request would
+time out; not on the dispatcher tick, because inference would block the notification
+sweep. It examines only slots the rules already flagged, at most four per garden, and
+only from frames taken in photo mode — an ambient frame would have it commenting on the
+lighting. It writes a sentence and no rule reads it, which
+[a test asserts](../garden-rules/src/lib.rs) rather than leaving to discipline.
+
 **Retention runs on its own daily loop, not the dispatcher tick.** Pruning moves on the
 scale of months; doing it 288 times a day would put a `DELETE` scan in front of every
 notification sweep for no benefit. Frames use each garden's own setting, because one
@@ -220,6 +229,8 @@ Its job is to make capture, storage, authorization and display real so that swap
 | `GARDEN_INSECURE_COOKIES` | *unset* | development only |
 | `GARDEN_NTFY_URL` / `_TOKEN` | *unset* | no push when unset |
 | `GARDEN_SMTP_*` | *unset* | no email when unset |
+| `GARDEN_OLLAMA_URL` | *unset* | no visual diagnosis when unset |
+| `GARDEN_OLLAMA_MODEL` | `qwen2.5vl:7b` | |
 | `RUST_LOG` | `garden_web=info,tower_http=warn` | |
 
 `GARDEN_BASE_URL` is the one people get wrong. Invite links and notification buttons are

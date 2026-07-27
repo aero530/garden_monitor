@@ -97,7 +97,10 @@ free and always runs. `Segmenter` is a trait so an ONNX backend can slot in when
 earns its weight, but the design's assumption that segmentation required inference was
 wrong for the question actually being asked — *how many seedlings are in this yPod*.
 
-Stage C is behind the `diagnosis` feature, off by default, and talks to a local Ollama.
+Stage C is behind the `diagnosis` feature and talks to a local Ollama. `garden-web`
+enables the feature and gates it at *runtime* on `GARDEN_OLLAMA_URL`, so turning it on
+is configuration rather than a rebuild — and it only ever looks at slots the
+deterministic rules have already flagged.
 **It returns a `String` and there is no path from it to a `Task`.** That is the
 guarantee, and it is structural rather than a policy: deterministic rules own anything
 touching dosing, water, or an actuator, so a model that invents a nitrogen deficiency

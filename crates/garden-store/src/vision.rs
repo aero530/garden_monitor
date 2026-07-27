@@ -31,7 +31,7 @@ fn metrics_from_row(row: &SqliteRow) -> Result<SlotMetrics> {
         canopy_area_cm2: row.try_get::<f64, _>("canopy_area_cm2")? as f32,
         green_fraction: row.try_get::<f64, _>("green_fraction")? as f32,
         yellowing_index: row.try_get::<f64, _>("yellowing_index")? as f32,
-        growth_rate_cm2_per_day: row.try_get::<f64, _>("growth_rate")? as f32,
+        growth_rate_cm2_per_day: row.try_get::<Option<f64>, _>("growth_rate")?.map(|r| r as f32),
         plant_count: row.try_get::<Option<i64>, _>("plant_count")?.map(|c| c as u8),
         flowering: row.try_get::<Option<i64>, _>("flowering")?.map(|f| f != 0),
         diagnosis: row.try_get("diagnosis")?,
@@ -118,7 +118,7 @@ impl Store {
             .bind(f64::from(m.canopy_area_cm2))
             .bind(f64::from(m.green_fraction))
             .bind(f64::from(m.yellowing_index))
-            .bind(f64::from(m.growth_rate_cm2_per_day))
+            .bind(m.growth_rate_cm2_per_day.map(f64::from))
             .bind(m.plant_count.map(i64::from))
             .bind(m.flowering.map(i64::from))
             .bind(m.diagnosis.as_deref())
@@ -214,6 +214,30 @@ impl Store {
             })
         })
         .transpose()
+    }
+
+    /// Attach a written assessment to the most recent measurement of a slot.
+    ///
+    /// Updated rather than inserted: the diagnosis describes a measurement that already
+    /// exists, and a row of its own would be a second opinion floating free of the
+    /// evidence it was formed from.
+    pub async fn set_diagnosis(
+        &self,
+        garden: GardenId,
+        slot: SlotId,
+        text: &str,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE slot_metrics SET diagnosis = ?3
+             WHERE garden_id = ?1 AND slot = ?2
+               AND at = (SELECT MAX(at) FROM slot_metrics WHERE garden_id = ?1 AND slot = ?2)",
+        )
+        .bind(garden.to_string())
+        .bind(i64::from(slot.0))
+        .bind(text)
+        .execute(&self.db)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     pub async fn slot_metrics_count(&self, garden: GardenId) -> Result<i64> {

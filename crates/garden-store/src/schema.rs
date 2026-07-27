@@ -284,7 +284,10 @@ CREATE TABLE IF NOT EXISTS slot_metrics (
     canopy_area_cm2 REAL NOT NULL,
     green_fraction  REAL NOT NULL,
     yellowing_index REAL NOT NULL,
-    growth_rate     REAL NOT NULL,
+    -- Nullable: absent until three measurements over more than a day make a fit
+    -- possible. Storing zero instead would be indistinguishable from a plant that has
+    -- genuinely stopped growing.
+    growth_rate     REAL,
     plant_count     INTEGER,
     flowering       INTEGER,
     diagnosis       TEXT,
