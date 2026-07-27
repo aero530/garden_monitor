@@ -13,6 +13,7 @@ mod brain;
 mod camera;
 mod hardware;
 mod pwm_watch;
+mod ultrasonic;
 
 use brain::{AGENT_VERSION, Client};
 use clap::{Parser, Subcommand};
@@ -216,6 +217,21 @@ fn read_once() -> Result<(), Box<dyn std::error::Error>> {
     let capabilities: Vec<_> = snapshot.capabilities().iter().map(|c| c.label()).collect();
     println!();
     println!("capabilities this reading demonstrates: {}", capabilities.join(", "));
+
+    // Called out on its own because it is the one sensor whose absence silently
+    // disables a whole rule, and "null" in the JSON does not say why.
+    if snapshot.water_level_mm.is_none() {
+        println!();
+        println!(
+            "No water level. Without it the water rule cannot run, so nothing will
+             ever tell you to top the tank up. Check, in order:
+               - this binary is running on the device, not your workstation
+               - the agent's user is in the `gpio` group (`id -nG`)
+               - the sensor is on GPIO{trig} (trigger) and GPIO{echo} (echo)",
+            trig = garden_proto::recon::expected::GPIO_ULTRASONIC_TRIG,
+            echo = garden_proto::recon::expected::GPIO_ULTRASONIC_ECHO,
+        );
+    }
     Ok(())
 }
 
@@ -373,6 +389,10 @@ async fn run_daemon(
         None
     };
 
+    // Held open across ticks: the ultrasonic registers a kernel interrupt, and
+    // re-registering it every minute would risk missing the edge being waited for.
+    let mut sensors = hardware::Bank::open();
+
     let mut since_frame = Duration::ZERO;
     loop {
         let now = Timestamp::now();
@@ -398,7 +418,7 @@ async fn run_daemon(
             beat(&heartbeat, &heartbeat_note(actuators.as_ref()));
         }
 
-        let snapshot = hardware::read_sensors(now);
+        let snapshot = sensors.read(now);
 
         // Clear any backlog first, so history stays in order after an outage.
         match client.drain_spool().await {

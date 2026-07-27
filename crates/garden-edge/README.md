@@ -199,6 +199,22 @@ Nothing here can exceed the 30% pump ceiling, because every duty goes through `D
 unverified** — `probe` is what confirms them, and a mismatch is expected information
 rather than a failure.
 
+### Tank level, and why the timing is kernel-side
+
+The ultrasonic sensor holds its echo pin high for as long as the sound took to return.
+At 0.343 mm/µs a millisecond of scheduling jitter is 170 mm — the whole tank — so the
+pulse is timed from two **kernel** interrupt timestamps rather than by watching the pin
+from userspace. Those are good to a few microseconds, which is under 2 mm.
+
+Air temperature from the AM2320 feeds the speed-of-sound calculation, because that is a
+bias rather than noise: uncorrected, a cold room reads the tank low all winter. Five
+pings are combined by median, and fewer than three valid ones reports nothing rather
+than a guess.
+
+The agent needs the `gpio` group for this — `SupplementaryGroups=gpio` in the unit. If
+it cannot open the device it logs a warning and reports no water level, which the
+capability model already treats as "not fitted".
+
 ### DS18B20 water probe
 
 ```mermaid

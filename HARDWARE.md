@@ -236,6 +236,9 @@ ExecStart=/usr/local/bin/garden-edge run
 Restart=always
 RestartSec=10
 User=pi
+# The ultrasonic water sensor needs the GPIO character device. This is the whole
+# privilege the agent gains for it — no root, no capabilities.
+SupplementaryGroups=gpio
 # Read-only phase: no need for root, and no reason to give it.
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -243,6 +246,13 @@ ReadWritePaths=/var/lib/garden
 
 [Install]
 WantedBy=multi-user.target
+```
+
+One-time, so the agent's user can open the GPIO device:
+
+```sh
+sudo usermod -aG gpio pi
+id -nG pi | tr ' ' '\n' | grep -qx gpio && echo "gpio group: ok"
 ```
 
 ```sh
@@ -293,6 +303,62 @@ very different thing from "the lights were off". If every row is `unavailable`:
 1. Check `pgrep pigpiod` — the reader depends on it
 2. If the vendor drives the pins some third way, jumper GPIO18 to a spare input and
    sample that instead
+
+---
+
+## The tank level sensor
+
+Stock hardware, already fitted, and the one sensor the whole water story rests on.
+Without it `water_level_mm` is absent, `Capability::WaterLevel` never appears, and the
+rule behind "tell me when to add water" cannot run at all.
+
+| Wire | Pi header pin | Signal |
+|---|---|---|
+| VCC | **2** | 5 V |
+| Trig | **35** | GPIO19 |
+| Echo | **37** | GPIO26 |
+| GND | **39** | GND |
+
+> **Check the echo line's voltage before trusting it.** An HC-SR04-style sensor running
+> on 5 V drives its echo pin to 5 V, and the Pi's GPIO is **not** 5 V tolerant. The
+> Studio's own harness presumably handles this, but if you are wiring a replacement,
+> put a divider on the echo line — roughly 1 kΩ in series with 2 kΩ to ground. Feeding
+> 5 V straight into GPIO26 is how you damage the SoC.
+
+Check it reads:
+
+```sh
+./garden-edge read
+```
+
+`water_level_mm` should be a number in the low hundreds and should *fall* as you pour
+water in — the sensor measures down to the surface, so a fuller tank is a nearer one.
+If it is `null`, the command prints what to check.
+
+### How it is measured, and why that matters
+
+The sensor answers by holding the echo pin high for as long as the sound took to
+return. At 0.343 mm/µs, a millisecond of scheduling delay would be 170 mm of error —
+the entire tank. So the pulse is **not** timed by watching the pin from userspace. The
+agent registers a kernel interrupt on both edges and subtracts the two kernel
+timestamps, which are taken at interrupt time and are good to a few microseconds.
+
+Two corrections on top of that:
+
+- **Air temperature.** The speed of sound gains about 0.6 m/s per degree, so a cold
+  room reads the water as further away than it is. The AM2320 reading already in hand
+  feeds the calculation. This is a bias, not noise — uncorrected it would read the tank
+  low all winter.
+- **Median of five.** A rippling surface scatters the occasional ping. The median
+  ignores an outlier that a mean would let move the answer by centimetres. Fewer than
+  three valid samples reports nothing rather than a guess.
+
+Then calibrate the distance-to-volume mapping, which is still placeholder constants:
+
+```sh
+# Fill and drain, recording what the sensor says at each level.
+garden-cli tank calibrate --capacity 15.5 330:0 240:5 150:10 60:15
+```
 
 ---
 

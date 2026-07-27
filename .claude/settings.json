@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -)",
+      "Bash(cargo test *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo check *)",
+      "Bash(echo \"=== exit: $? ===\")",
+      "Bash(PYTHONIOENCODING=utf-8 python '__TRACKED_VAR__\\\\doc_ultra.py')",
+      "Bash(awk -F'[ ;]' '{p+=$4; f+=$7} END{print p\" passing, \"f\" failing\"}')"
+    ]
+  }
+}

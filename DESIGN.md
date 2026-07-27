@@ -46,7 +46,7 @@ run **Raspberry Pi OS on a Pi Zero–class board**, uplinked to Azure IoT Hub.
 | Air temp / humidity | AM2320 | I²C `0x38` |
 | Pump current | INA219 | I²C `0x40` |
 | PCB temp | PCT2075 | I²C `0x48` |
-| Water level | DYP-A01-V2.0 ultrasonic | GPIO19 trig / GPIO26 echo |
+| Water level | DYP-A01-V2.0 ultrasonic | GPIO19 trig / GPIO26 echo, kernel-timed edges |
 | Grow lights | LED full spectrum | PWM GPIO18 @ 8 kHz |
 | Pump | — | PWM GPIO24 @ 50 Hz, **30% max duty** |
 | Cameras | USB UVC | `/dev/video0`, `/dev/video1` |

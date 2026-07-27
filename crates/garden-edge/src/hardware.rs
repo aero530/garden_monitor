@@ -348,7 +348,58 @@ mod imp {
     }
 }
 
-pub use imp::{read_sensors, scan_i2c};
+pub use imp::scan_i2c;
+
+/// The sensors this device actually has, held open across reads.
+///
+/// Most peripherals are stateless — open the I²C bus, read, close — but the ultrasonic
+/// is not: it registers a kernel interrupt on the echo pin, and re-registering that
+/// every minute would be both wasteful and a good way to miss the edge we are waiting
+/// for. So the daemon holds a `Bank` and the one-shot subcommands build a throwaway.
+pub struct Bank {
+    ultrasonic: Option<crate::ultrasonic::Ultrasonic>,
+}
+
+impl Bank {
+    pub fn open() -> Self {
+        let ultrasonic = match crate::ultrasonic::Ultrasonic::open() {
+            Ok(sensor) => Some(sensor),
+            // A desktop build has no pins and says so; that is not news.
+            Err(crate::ultrasonic::UltrasonicError::Unsupported(arch)) => {
+                tracing::debug!(%arch, "no GPIO on this build; water level unavailable");
+                None
+            }
+            // On a Pi this is almost always the `gpio` group. Worth shouting about,
+            // because the symptom otherwise is simply never being told to add water.
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "cannot open the ultrasonic sensor — water level will be missing,                      and the water rule cannot run without it. Check the agent's user                      is in the `gpio` group."
+                );
+                None
+            }
+        };
+        Self { ultrasonic }
+    }
+
+    /// One pass over everything fitted.
+    ///
+    /// Air temperature is read first and handed to the ultrasonic: the speed of sound
+    /// varies about 0.6 m/s per degree, which across this tank is millimetres of
+    /// systematic error in the same direction all winter.
+    pub fn read(&mut self, now: Timestamp) -> SensorSnapshot {
+        let mut snapshot = imp::read_sensors(now);
+        if let Some(sensor) = self.ultrasonic.as_mut() {
+            snapshot.water_level_mm = sensor.read_mm(snapshot.air_temp_c);
+        }
+        snapshot
+    }
+}
+
+/// One-shot read, for `probe`, `read` and `report`.
+pub fn read_sensors(now: Timestamp) -> SensorSnapshot {
+    Bank::open().read(now)
+}
 
 /// Read a DS18B20 water probe, if one is fitted.
 ///
