@@ -106,6 +106,7 @@ someone can be asked to complete.
 | `/gardens/{id}/slots` | **the plantings grid** — plant, log, harvest, pull |
 | `/gardens/{id}/frames` | camera history, with an ambient/comparable badge |
 | `/gardens/{id}/members` | sharing, roles, invitations, transfer |
+| `/gardens/{id}/schedule` | the light and pump programme the Pi runs |
 | `/gardens/{id}/storage` | frames held, disk used, and how long to keep them |
 | `/varieties`, `/varieties/{id}` | the plant book — Gardyn's own care text |
 | `/account/notifications` | ntfy topic, UTC offset, quiet hours, calendar link |
@@ -166,6 +167,19 @@ dark night does not flap the harvest rule between measured and calendar.
 and deep clean have no planting to record against, and until recently they recorded
 against nothing at all — so they were marked done and re-emitted on the next tick,
 forever. The same failure the plantings already fixed.
+
+**The slots page shows what the camera measured.** Canopy area, seedling count,
+chlorosis and the fitted growth rate sit under each plant, so the evidence the harvest
+rule used is visible next to its conclusion rather than only inside it. When vision is
+off the page says which of the three reasons applies — no calibration, no recent
+frames, or nothing readable — because an absence of numbers cannot distinguish them.
+
+**The schedule page is deliberately inert-looking.** It writes a programme the Pi picks
+up on its next telemetry call and then runs from its own clock; it does not drive
+anything, and it says so, because the obvious reading of a schedule form is that the
+lights just changed. An invalid schedule is refused with the values still in the form
+rather than clamped — a silently adjusted one would leave the operator believing the
+garden runs what they typed.
 
 **Retention runs on its own daily loop, not the dispatcher tick.** Pruning moves on the
 scale of months; doing it 288 times a day would put a `DELETE` scan in front of every

@@ -261,6 +261,9 @@ async fn detail(
                 a.button href=(format!("/gardens/{id}/members")) {
                     "Sharing (" (members.len()) ")"
                 }
+                @if actor.can(garden.id, Permission::ControlHardware) {
+                    a.button href=(format!("/gardens/{id}/schedule")) { "Schedule" }
+                }
                 @if actor.can(garden.id, Permission::ConfigureGarden) {
                     a.button href=(format!("/gardens/{id}/storage")) { "Storage" }
                 }

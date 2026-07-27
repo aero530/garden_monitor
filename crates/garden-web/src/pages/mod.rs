@@ -7,6 +7,7 @@ pub mod gardens;
 pub mod members;
 pub mod notify;
 pub mod slots;
+pub mod schedule;
 pub mod storage;
 pub mod tasks;
 pub mod varieties;

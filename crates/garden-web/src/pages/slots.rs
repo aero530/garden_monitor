@@ -48,6 +48,7 @@ async fn page(
     let history = state.store.planting_history(id, 20).await?;
     let book = VarietyBook::starter();
     let can_edit = role.grants(Permission::ManagePlantings);
+    let calibrated = state.store.roi_map(id).await?.is_some();
     let today = now.to_string().split('T').next().unwrap_or_default().to_string();
 
     Ok(ui::page(
@@ -68,6 +69,8 @@ async fn page(
             @if !can_edit {
                 p.muted.small { "You can see what is growing here, but not change it." }
             }
+
+            (vision_state(&snapshot, id, calibrated))
 
             p.muted.small {
                 "Laid out as the tower is: " (snapshot.geometry.columns)
@@ -192,6 +195,8 @@ fn occupied(
                 (next_up(snapshot, planting, v, now))
             }
 
+            (measured(snapshot, planting.slot))
+
             @if can_edit {
                 div.row style="margin-top:0.6rem; gap:0.3rem" {
                     @if planting.germinated_at.is_none() {
@@ -210,6 +215,89 @@ fn occupied(
                         button.link.danger type="submit" { "Pull" }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// What the camera measured, for one slot.
+///
+/// Nothing at all when vision is off, which is the common case and should not leave a
+/// row of empty labels down the tower. When it is on, the four numbers the rules
+/// actually consume — so a person can see the same evidence the engine did, rather
+/// than being told "still sizing up" with no way to check.
+fn measured(snapshot: &GardenState, slot: SlotId) -> Markup {
+    let Some(m) = snapshot.metrics_for(slot) else {
+        return html! {};
+    };
+
+    html! {
+        div.measured {
+            span title="canopy area measured from the last frame" {
+                (format!("{:.0} cm²", m.canopy_area_cm2))
+            }
+            @if let Some(count) = m.plant_count {
+                span title="distinct seedlings counted" {
+                    (count) @if count == 1 { " plant" } @else { " plants" }
+                }
+            }
+            @if m.is_chlorotic() {
+                span.sev-advisory title="yellowing, measured from leaf colour" {
+                    (format!("{:.0}% yellow", m.yellowing_index * 100.0))
+                }
+            }
+            // Growth is only worth showing once it is a fitted rate rather than the
+            // zero a single frame leaves behind.
+            @if m.growth_rate_cm2_per_day.abs() > 0.05 {
+                @if m.is_stalled() {
+                    span.sev-advisory title="canopy is not expanding" { "stalled" }
+                } @else {
+                    span title="fitted over the last ten days" {
+                        (format!("+{:.0} cm²/day", m.growth_rate_cm2_per_day))
+                    }
+                }
+            }
+            @if m.flowering == Some(true) {
+                span title="petals detected" { "flowering" }
+            }
+        }
+        @if let Some(note) = &m.diagnosis {
+            p.small.muted style="margin:0.35rem 0 0; font-style:italic" {
+                (note)
+                " "
+                span.muted { "— advisory only" }
+            }
+        }
+    }
+}
+
+/// One line saying whether the camera is measuring this garden, and what to do if not.
+///
+/// Worth its own line because "no canopy figures anywhere" has three quite different
+/// causes — no camera, no calibration, or frames too dark to read — and the operator
+/// cannot tell them apart from an absence.
+fn vision_state(snapshot: &GardenState, garden: GardenId, calibrated: bool) -> Markup {
+    let measuring = snapshot.slot_metrics.len();
+
+    html! {
+        @if measuring > 0 {
+            p.muted.small {
+                "The camera is measuring " (measuring) " slot"
+                @if measuring != 1 { "s" }
+                ". Canopy figures below come from the most recent readable frame."
+            }
+        } @else if calibrated {
+            p.muted.small {
+                "Vision is calibrated but nothing has been measured recently — either no "
+                "frames have arrived, or the last ones were too dark to read. "
+                a href=(format!("/gardens/{garden}/frames")) { "Check the camera" } "."
+            }
+        } @else {
+            p.muted.small {
+                "The camera is not calibrated, so no canopy measurements are taken. "
+                "Harvest and thinning fall back to the calendar. Run "
+                code { "garden-cli vision init --garden " (garden) }
+                " to set it up."
             }
         }
     }

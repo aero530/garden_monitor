@@ -219,6 +219,10 @@ th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-
 }
 .slot { border: 1px solid var(--line); border-radius: 8px; padding: 0.45rem 0.5rem; background: var(--panel); font-size: 0.8rem; }
 .slot.empty { color: var(--muted); border-style: dashed; }
+/* What the camera measured: a compact row of facts, not a table. */
+.measured { display: flex; flex-wrap: wrap; gap: 0.15rem 0.6rem; margin-top: 0.35rem;
+  font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.measured .sev-advisory { color: var(--advisory); font-weight: 600; }
 code { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 0.85em; }
 .token { word-break: break-all; background: var(--bg); padding: 0.5rem; border-radius: 8px; border: 1px solid var(--line); }
 "#;

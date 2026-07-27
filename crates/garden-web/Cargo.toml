@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 garden-auth.workspace = true
 garden-core.workspace = true
+garden-hal.workspace = true
 garden-notify.workspace = true
 garden-proto.workspace = true
 garden-rules.workspace = true

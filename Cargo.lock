@@ -810,6 +810,7 @@ dependencies = [
  "axum",
  "garden-auth",
  "garden-core",
+ "garden-hal",
  "garden-notify",
  "garden-proto",
  "garden-rules",
