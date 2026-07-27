@@ -378,3 +378,38 @@ async fn a_schedule_that_would_overload_the_supply_is_refused() {
     );
     assert!(err.contains("ceiling"), "{err}");
 }
+
+#[tokio::test]
+async fn plan_suggests_something_for_every_empty_slot() {
+    let f = fixture("plan").await;
+    let out = run(&f, &["plan", "--garden", &f.garden.to_string()]);
+
+    // Slot 0 is planted by the fixture; the other fifteen are not.
+    assert!(out.contains("already coming"), "{out}");
+    assert!(out.contains("harvest ~day"), "{out}");
+    // And it explains the ranking, because "why this one" is the whole question.
+    assert!(out.contains("same afternoon"), "{out}");
+
+    let suggested_slots = out.lines().filter(|l| l.contains("light)")).count();
+    assert_eq!(suggested_slots, 15, "one heading per empty slot:\n{out}");
+}
+
+#[tokio::test]
+async fn plan_on_an_empty_tower_says_the_rhythm_is_yours_to_set() {
+    let f = fixture("plan-empty").await;
+    // Pull the only plant.
+    run(&f, &["gardens"]);
+    let store = Store::open_with(&f.url, f.dir.join("frames")).await.unwrap();
+    store
+        .remove_planting(f.garden, gardyn_planting_id(), Timestamp::now())
+        .await
+        .unwrap();
+    drop(store);
+
+    let out = run(&f, &["plan", "--garden", &f.garden.to_string()]);
+    assert!(out.contains("sets the rhythm"), "{out}");
+}
+
+fn gardyn_planting_id() -> garden_core::PlantingId {
+    garden_core::PlantingId(1)
+}

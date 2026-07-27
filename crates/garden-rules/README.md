@@ -7,7 +7,7 @@ isolation, and it means months of recorded history can be replayed against a mod
 rule to see what it *would* have said.
 
 ```sh
-cargo test -p garden-rules    # 87 tests
+cargo test -p garden-rules    # 107 tests
 ```
 
 ---
@@ -148,6 +148,41 @@ Grouped by module: `water`, `nutrients`, `roots`, `harvest`, `plants`, `maintena
 `rootzone`.
 
 ---
+
+## The succession planner
+
+Not a rule — it emits no tasks and changes nothing. It answers a question the rules
+cannot, because by the time they say "harvest this", the decision that mattered was made
+six weeks earlier: **what should go in this slot, so the harvests do not all arrive at
+once.**
+
+```rust
+use garden_rules::succession;
+
+for suggestion in succession::suggest(&state, slot, 3) {
+    println!("{} — {}", suggestion.name, suggestion.reason);
+}
+```
+
+Two hard filters, both reusing logic that already existed. The slot must be able to
+light the plant (`LightZone::satisfied_by`), and the variety's EC band must overlap what
+is already growing — a tank is one solution, so suggesting a tomato into a tank of
+lettuce proposes a compromise that starves both. Then it maximises the gap between the
+candidate's first harvest and the nearest one already expected.
+
+**`plan_tower` is not `suggest` in a loop**, and the difference is the whole feature.
+Scoring each empty slot independently gives every one of them the same answer — the
+longest-maturing variety is furthest from what is already growing, for all of them at
+once — so a whole-tower plan would read "plant thirteen lemongrass" and produce exactly
+the pile-up it was meant to prevent. Each choice is therefore made knowing the ones
+before it.
+
+The single-slot form is what the UI uses on an empty card, deliberately: someone reading
+one card is filling one slot, and a suggestion that assumed they would also fill the
+other twelve today would be planning a day that is not happening.
+
+Not in scope for this first cut: joint optimisation over the whole season, seasonal
+preference, seed inventory.
 
 ## Two findings from the simulator
 

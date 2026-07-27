@@ -223,6 +223,11 @@ th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-
 .measured { display: flex; flex-wrap: wrap; gap: 0.15rem 0.6rem; margin-top: 0.35rem;
   font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .measured .sev-advisory { color: var(--advisory); font-weight: 600; }
+/* Ranked replant candidates on an empty slot. */
+.suggested { display: flex; flex-wrap: wrap; gap: 0.15rem 0.5rem; margin: 0.4rem 0 0;
+  font-size: 0.8rem; }
+.suggested span { color: var(--accent); }
+.suggested span.muted { color: var(--muted); }
 code { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 0.85em; }
 .token { word-break: break-all; background: var(--bg); padding: 0.5rem; border-radius: 8px; border: 1px solid var(--line); }
 "#;

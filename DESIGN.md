@@ -537,7 +537,7 @@ gated on hardware.
 | **4** | `garden-vision` `CanopyMetrics`: undistortion, ROI calibration, canopy tracking | ✅ built — needs a calibrated garden |
 | **5** | DS18B20 water temperature → root-zone rules | Probe reading reliably |
 | **6** | **Takeover**: `garden-guard`, failsafe, cut cloud, own lights + pump, photo mode | Parity proven, rollback tested |
-| **7** | Succession planner | — |
+| **7** | Succession planner | ✅ first cut — greedy, per slot and tower-wide |
 | *opt* | `PlantSegmentation` (ONNX) — enable any time after phase 4 | — |
 | *opt* | `VisualDiagnosis` (local Ollama VLM) — enable any time after phase 4 | — |
 | *opt* | EC + pH probes → measured dosing supersedes estimates | hardware purchased |

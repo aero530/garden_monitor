@@ -5,7 +5,7 @@ rules.
 
 ```sh
 cargo run -p garden-cli -- gardens
-cargo test -p garden-cli    # 37 tests, 14 of them running the built binary
+cargo test -p garden-cli    # 41 tests, 16 of them running the built binary
 ```
 
 Talks to the database directly rather than through the web API, so it runs on the
@@ -143,6 +143,31 @@ never reads it as "stop".
 The Pi picks it up on its next telemetry call, and only acts on it if it was started
 with `--own-actuators`.
 
+## Planning what goes in next
+
+```sh
+garden-cli plan --garden $ID
+```
+
+```
+already coming:
+    day   29   Arugula
+    day   42   Lacinato Kale
+    day   56   Basil
+
+slot 4  (high light)
+    Lavender                 harvest ~day 108   108 days out, 52 days clear of your next one
+    Lemongrass               harvest ~day 106   106 days out, 50 days clear of your next one
+
+slot 5  (medium light)
+    Chives                   harvest ~day  82   82 days out, 26 days clear of your next one
+```
+
+Each slot is planned knowing the ones above it, so the answer is a staggered tower
+rather than thirteen of whatever matures slowest. What is already coming is printed
+first, from the same function the planner reasons over — a display that computed it
+separately could disagree with the advice underneath and make it look wrong.
+
 ## Replay
 
 ```sh
@@ -200,6 +225,7 @@ case.
 | `vision apply` / `clear` | yes | turn vision on and off |
 | `log …` | yes | tank events |
 | `schedule …` | yes | the light and pump programme |
+| `plan` | yes | what to put in each empty slot |
 | `replay` | yes | history against the current rules |
 | `backup` | yes | `VACUUM INTO` a consistent copy |
 

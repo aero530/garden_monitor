@@ -60,6 +60,15 @@ enum Command {
     #[command(subcommand)]
     Schedule(ScheduleCommand),
 
+    /// Suggest what to plant in each empty slot, spreading the harvests out.
+    Plan {
+        #[arg(long)]
+        garden: String,
+        /// Candidates to show per slot.
+        #[arg(long, default_value_t = 3)]
+        top: usize,
+    },
+
     /// Replay stored history against the current rule set.
     Replay(ReplayArgs),
 
@@ -319,6 +328,7 @@ async fn run() -> Fallible {
         Command::Vision(command) => vision_online(&store, command).await,
         Command::Log(command) => log(&store, command).await,
         Command::Schedule(command) => schedule(&store, command).await,
+        Command::Plan { garden, top } => plan(&store, &garden, top).await,
         Command::Replay(args) => replay_cmd(&store, args).await,
         Command::Backup { out } => {
             let path = out.to_string_lossy().to_string();
@@ -742,6 +752,65 @@ fn print_schedule(s: &Schedule) {
         s.pump_duty * 100.0
     );
     println!("    daily light    {:.1} duty-hours", s.daily_duty_hours());
+}
+
+// --- Plan -------------------------------------------------------------------------------
+
+async fn plan(store: &Store, garden: &str, top: usize) -> Fallible {
+    let id = parse_garden(garden)?;
+    let found = store.find_garden(id).await?.ok_or("no such garden")?;
+    let now = Timestamp::now();
+
+    let mut state = garden_core::GardenState::for_garden(id, now);
+    state.geometry = geometry_for(found.model);
+    state.plantings = store.active_plantings(id).await?;
+
+    println!("{} — what to plant where\n", found.name);
+
+    // The same list the planner reasons over, so the advice below can be checked
+    // rather than taken on trust. Computing it separately here would let the display
+    // and the planner disagree, which reads as the advice being wrong.
+    let coming = garden_rules::succession::coming_harvests(&state);
+
+    if coming.is_empty() {
+        println!("Nothing is due to be harvested, so anything you plant sets the rhythm.\n");
+    } else {
+        println!("already coming:");
+        for (name, days) in &coming {
+            println!("    day {days:>4.0}   {name}");
+        }
+        println!();
+    }
+
+    let empty = state.empty_slots();
+    if empty.is_empty() {
+        println!("Every slot is full. Nothing to plan until one frees up.");
+        return Ok(());
+    }
+
+    // Planned as a tower rather than slot by slot: each choice is made knowing the
+    // ones before it, or every empty slot gets the same answer.
+    for (slot, ranked) in garden_rules::succession::plan_tower(&state, top) {
+        let zone = state.geometry.light_zone(slot);
+        println!("{}  ({})", slot, zone.label());
+        if ranked.is_empty() {
+            println!("    nothing in the catalogue suits this slot");
+        }
+        for suggestion in ranked {
+            println!(
+                "    {:<24} harvest ~day {:>3.0}   {}",
+                suggestion.name, suggestion.harvest_in_days, suggestion.reason
+            );
+        }
+        println!();
+    }
+
+    println!(
+        "Ranked by how far each harvest lands from the ones already coming. Sixteen\n\
+         slots planted the same afternoon give sixteen harvests in one week and then\n\
+         nothing for a month; this is where that gets avoided."
+    );
+    Ok(())
 }
 
 // --- Replay -----------------------------------------------------------------------------

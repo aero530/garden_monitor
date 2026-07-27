@@ -12,7 +12,10 @@ pub mod nutrients;
 pub mod plants;
 pub mod roots;
 pub mod rootzone;
+pub mod succession;
 pub mod water;
+
+pub use succession::{Suggestion, suggest};
 
 pub use engine::{
     Engine, Evaluation, PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule, Suppression,

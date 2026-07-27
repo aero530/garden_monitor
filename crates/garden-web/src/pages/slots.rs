@@ -96,7 +96,7 @@ async fn page(
                                     Some(planting) => {
                                         (occupied(&snapshot, planting, id, zone, can_edit, now))
                                     }
-                                    None => (empty(slot, id, zone, &book, can_edit, &today)),
+                                    None => (empty(&snapshot, slot, id, zone, &book, can_edit, &today)),
                                 }
                             }
                         }
@@ -368,6 +368,7 @@ fn log_button(garden: GardenId, planting: u64, event: PlantingEvent, label: &str
 }
 
 fn empty(
+    snapshot: &GardenState,
     slot: SlotId,
     garden: GardenId,
     zone: LightZone,
@@ -375,6 +376,15 @@ fn empty(
     can_edit: bool,
     today: &str,
 ) -> Markup {
+    // Three candidates, ranked by how far their harvest lands from everything already
+    // coming. Sixteen slots planted the same afternoon give sixteen harvests in the
+    // same week and then nothing for a month; this is where that gets prevented,
+    // because by the time the harvest rule fires the decision was made six weeks ago.
+    //
+    // Per slot rather than tower-wide, deliberately: someone reading one card is
+    // filling one slot, and a suggestion that assumed they would also fill the other
+    // twelve today would be planning a day that is not happening.
+    let suggestions = garden_rules::succession::suggest(snapshot, slot, 3);
     html! {
         div.card style="border-style:dashed" {
             div.row {
@@ -382,12 +392,28 @@ fn empty(
                 div.spacer {}
                 span.muted.small { (zone.label()) }
             }
+            @if !suggestions.is_empty() {
+                div.suggested {
+                    span.muted { "Suggested" }
+                    @for suggestion in &suggestions {
+                        span title=(suggestion.reason) { (suggestion.name) }
+                    }
+                }
+            }
+
             @if can_edit {
                 form method="post" action=(format!("/gardens/{garden}/slots/{}/plant", slot.0)) {
                     label for=(format!("variety-{}", slot.0)) { "Plant" }
                     // Varieties this slot can actually support come first, so the
                     // obvious choice is also the correct one.
                     select id=(format!("variety-{}", slot.0)) name="variety" {
+                        @if !suggestions.is_empty() {
+                            optgroup label="Spreads your harvests out" {
+                                @for suggestion in &suggestions {
+                                    option value=(suggestion.variety.0) { (suggestion.name) }
+                                }
+                            }
+                        }
                         optgroup label=(format!("Suits {}", zone.label())) {
                             @for variety in book.iter().filter(|v| v.light_zone.satisfied_by(zone)) {
                                 option value=(variety.id.0) { (variety.name) }
