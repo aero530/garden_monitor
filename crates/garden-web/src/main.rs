@@ -11,6 +11,7 @@ mod dispatch;
 mod error;
 mod pages;
 mod render;
+mod retention;
 mod state;
 mod ui;
 mod vision;
@@ -76,6 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_notifier(notifier);
 
     dispatch::spawn(state.clone());
+    retention::spawn(state.clone());
 
     let router = router(state);
 
@@ -98,6 +100,7 @@ fn router(state: AppState) -> Router {
         .merge(pages::notify::routes())
         .merge(pages::frames::routes())
         .merge(pages::slots::routes())
+        .merge(pages::storage::routes())
         .merge(pages::tasks::routes())
         .merge(pages::varieties::routes())
         .merge(pages::fleet::routes())

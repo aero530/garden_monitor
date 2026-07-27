@@ -80,6 +80,7 @@ Three constants shape the experience more than any of the code around them:
 | | | |
 |---|---|---|
 | `TICK` | 300 s | how often the world is re-evaluated |
+| `retention::INTERVAL` | 24 h | pruning, on its own loop — see below |
 | `MAX_BURST` | **3** | interrupting notifications per garden per sweep |
 | `BRIEF_HOUR` | 8 | local hour the daily digest goes out |
 
@@ -105,6 +106,7 @@ someone can be asked to complete.
 | `/gardens/{id}/slots` | **the plantings grid** — plant, log, harvest, pull |
 | `/gardens/{id}/frames` | camera history, with an ambient/comparable badge |
 | `/gardens/{id}/members` | sharing, roles, invitations, transfer |
+| `/gardens/{id}/storage` | frames held, disk used, and how long to keep them |
 | `/varieties`, `/varieties/{id}` | the plant book — Gardyn's own care text |
 | `/account/notifications` | ntfy topic, UTC offset, quiet hours, calendar link |
 | `/system` | fleet health. Administrators only, and **garden contents are not on it** |
@@ -164,6 +166,13 @@ dark night does not flap the harvest rule between measured and calendar.
 and deep clean have no planting to record against, and until recently they recorded
 against nothing at all — so they were marked done and re-emitted on the next tick,
 forever. The same failure the plantings already fixed.
+
+**Retention runs on its own daily loop, not the dispatcher tick.** Pruning moves on the
+scale of months; doing it 288 times a day would put a `DELETE` scan in front of every
+notification sweep for no benefit. Frames use each garden's own setting, because one
+garden you are debugging deserves more history than one that has been fine for months.
+Shortening that window deletes what falls outside it, so the UI states the count and
+the dates and asks again before doing it.
 
 **Camera frames go through the same membership check as everything else.** A photograph
 of someone's kitchen is at least as sensitive as the sensor readings beside it. Uploaded

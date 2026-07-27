@@ -50,6 +50,14 @@ pub struct AppState {
     pub config: Arc<Config>,
     /// `None` when no channel is configured. The web UI still works; nothing is sent.
     pub notifier: Option<Arc<garden_notify::Notifier>>,
+    /// A pinned clock, for tests only.
+    ///
+    /// The retention sweep decides what is old by comparing against now, so a test
+    /// that used the wall clock would have to write timestamps relative to whenever it
+    /// happened to run. Pinning is clearer than arithmetic against `Timestamp::now()`
+    /// in every assertion.
+    #[cfg(test)]
+    clock: Option<jiff::Timestamp>,
 }
 
 impl AppState {
@@ -58,7 +66,17 @@ impl AppState {
             store,
             config: Arc::new(config),
             notifier: None,
+            #[cfg(test)]
+            clock: None,
         }
+    }
+
+    /// Pin the clock. Test-only, so production cannot accidentally stop time.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_clock_at(mut self, at: jiff::Timestamp) -> Self {
+        self.clock = Some(at);
+        self
     }
 
     #[must_use]
@@ -68,6 +86,10 @@ impl AppState {
     }
 
     pub fn now(&self) -> jiff::Timestamp {
+        #[cfg(test)]
+        if let Some(pinned) = self.clock {
+            return pinned;
+        }
         jiff::Timestamp::now()
     }
 }

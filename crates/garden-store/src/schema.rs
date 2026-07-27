@@ -41,6 +41,20 @@ CREATE TABLE IF NOT EXISTS gardens (
     created_at TEXT NOT NULL
 );
 
+-- Per-garden operator settings.
+--
+-- A side table rather than columns on `gardens`, because the schema is applied
+-- idempotently with IF NOT EXISTS and SQLite has no ADD COLUMN IF NOT EXISTS — so a
+-- new column would reach new databases and silently miss every existing one. Matches
+-- the `vision_config` and `garden_schedule` pattern.
+CREATE TABLE IF NOT EXISTS garden_settings (
+    garden_id            TEXT PRIMARY KEY REFERENCES gardens(id) ON DELETE CASCADE,
+    -- How long camera frames are kept. Frames are the only thing here that grows
+    -- without bound: one an hour is ~8,700 files a year per garden.
+    frame_retention_days INTEGER NOT NULL,
+    updated_at           TEXT NOT NULL
+);
+
 -- The light and pump programme the Pi should be running, as a `garden_hal::Schedule`.
 --
 -- Handed to the agent on its next telemetry response, never pushed. The agent runs it

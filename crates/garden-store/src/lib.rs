@@ -13,6 +13,9 @@ pub mod notifications;
 pub mod plantings;
 pub mod readings;
 pub mod schema;
+pub mod settings;
+#[cfg(test)]
+mod test_support;
 pub mod tank;
 pub mod tasks;
 pub mod vision;

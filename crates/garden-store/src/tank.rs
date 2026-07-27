@@ -119,37 +119,10 @@ impl Store {
 }
 
 #[cfg(test)]
-mod tests_support {
-    pub use super::*;
-    pub use garden_auth::EmailAddress;
-    pub use garden_core::{DeviceModel, TaskKind, time::add_days};
-
-    pub fn t0() -> Timestamp {
-        Timestamp::from_second(1_700_000_000).unwrap()
-    }
-
-    pub async fn fixture() -> (Store, GardenId, UserId) {
-        let store = Store::in_memory().await.unwrap();
-        let user = store
-            .create_user(
-                EmailAddress::parse("phil@example.com").unwrap(),
-                "Phil",
-                "a long enough password",
-                t0(),
-            )
-            .await
-            .unwrap();
-        let garden = store
-            .create_garden("Kitchen", DeviceModel::Studio2, "UTC", user.id, t0())
-            .await
-            .unwrap();
-        (store, garden.id, user.id)
-    }
-}
-
-#[cfg(test)]
 mod tests {
-    use super::tests_support::*;
+    use super::*;
+    use crate::test_support::*;
+    use garden_core::{DeviceModel, TaskKind, time::add_days};
 
     fn geometry() -> TankGeometry {
         TankGeometry::STUDIO_2
@@ -157,7 +130,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_fresh_garden_has_never_been_maintained() {
-        let (store, garden, _) = fixture().await;
+        let (store, garden) = fixture().await;
         let tank = store.tank_state_at(garden, &geometry(), t0()).await.unwrap();
         assert_eq!(tank.last_refresh, None);
         assert_eq!(tank.last_food_dose, None);
@@ -168,7 +141,7 @@ mod tests {
     async fn a_recorded_action_moves_the_timestamp_the_rules_read() {
         // The whole point. Without this the maintenance rules fire on every tick
         // forever, because nothing they read ever changes.
-        let (store, garden, user) = fixture().await;
+        let (store, garden, user) = fixture_with_user().await;
         let fed = add_days(t0(), 3.0);
         store
             .record_tank_event(
@@ -190,7 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn events_fold_forward_in_order() {
-        let (store, garden, user) = fixture().await;
+        let (store, garden, user) = fixture_with_user().await;
         // Drink the tank down, top it off twice, then feed it.
         for day in [1.0, 2.0] {
             store
@@ -227,7 +200,7 @@ mod tests {
     async fn feeding_twice_does_not_compound_to_double_strength() {
         // `FedToStrength` rather than `FoodDose` exists for exactly this: the operator
         // who tops up the nutrients weekly should end at full strength, not at 300%.
-        let (store, garden, user) = fixture().await;
+        let (store, garden, user) = fixture_with_user().await;
         for day in [1.0, 8.0, 15.0] {
             store
                 .record_tank_event(
@@ -250,7 +223,7 @@ mod tests {
     async fn state_is_reconstructed_as_of_a_past_moment() {
         // What makes replay honest: the tank has to look the way it looked then, not
         // the way it looks now.
-        let (store, garden, user) = fixture().await;
+        let (store, garden, user) = fixture_with_user().await;
         store
             .record_tank_event(garden, TankEvent::DeepClean, Some(user), add_days(t0(), 10.0))
             .await
@@ -271,7 +244,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_mis_logged_event_can_be_removed_and_the_state_recovers() {
-        let (store, garden, user) = fixture().await;
+        let (store, garden, user) = fixture_with_user().await;
         let id = store
             .record_tank_event(garden, TankEvent::DeepClean, Some(user), t0())
             .await
@@ -298,7 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn one_gardens_tank_log_is_invisible_to_another() {
-        let (store, mine, user) = fixture().await;
+        let (store, mine, user) = fixture_with_user().await;
         let theirs = store
             .create_garden("Theirs", DeviceModel::Studio2, "UTC", user, t0())
             .await
@@ -400,12 +373,12 @@ impl Store {
 
 #[cfg(test)]
 mod schedule_tests {
-    use super::tests_support::*;
+    use crate::test_support::*;
     use garden_hal::Schedule;
 
     #[tokio::test]
     async fn a_garden_has_no_schedule_until_one_is_set() {
-        let (store, garden, _) = fixture().await;
+        let (store, garden) = fixture().await;
         assert_eq!(store.schedule(garden).await.unwrap(), None);
 
         store
@@ -417,7 +390,7 @@ mod schedule_tests {
 
     #[tokio::test]
     async fn setting_a_schedule_replaces_the_previous_one() {
-        let (store, garden, _) = fixture().await;
+        let (store, garden) = fixture().await;
         store
             .set_schedule(garden, &Schedule::DEFAULT, t0())
             .await
@@ -434,7 +407,7 @@ mod schedule_tests {
     async fn a_schedule_the_hardware_should_not_run_is_refused_at_the_boundary() {
         // Rejected where a person can see the error, rather than accepted and then
         // silently ignored by every Pi that receives it.
-        let (store, garden, _) = fixture().await;
+        let (store, garden) = fixture().await;
         let greedy = Schedule {
             pump_duty: 1.0,
             ..Schedule::DEFAULT
@@ -445,7 +418,7 @@ mod schedule_tests {
 
     #[tokio::test]
     async fn clearing_means_no_opinion_rather_than_darkness() {
-        let (store, garden, _) = fixture().await;
+        let (store, garden) = fixture().await;
         store
             .set_schedule(garden, &Schedule::DEFAULT, t0())
             .await
@@ -456,7 +429,7 @@ mod schedule_tests {
 
     #[tokio::test]
     async fn one_gardens_schedule_is_invisible_to_another() {
-        let (store, mine, user) = fixture().await;
+        let (store, mine, user) = fixture_with_user().await;
         let theirs = store
             .create_garden(
                 "Theirs",

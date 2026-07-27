@@ -329,6 +329,7 @@ error rather than a permissions one.
 |---|---|---|
 | `/var/lib/garden/db/` | `garden.db` and its WAL | yes, nightly |
 | `/var/lib/garden/frames/` | camera images, one file each | **no** — see [Part 9](#part-9--backups) |
+
 | `/var/lib/garden/backups/` | nightly `.db.gz` snapshots | it *is* the backup |
 | `/var/lib/garden-ntfy/` | ntfy's user and token database | worth copying |
 | `/etc/garden/` | `web.env`, `ntfy-server.yml` | **yes — copy these somewhere safe** |
@@ -756,13 +757,16 @@ Pi's `/etc/garden/edge.env`.
 interrupting notifications per garden per sweep. The rest come on the next sweep or in
 the morning brief. See [NOTIFICATIONS.md](NOTIFICATIONS.md).
 
-**Disk filling up.** Almost certainly camera frames:
+**Disk filling up.** Almost certainly camera frames. Open **Storage** on the garden —
+it shows how many are held, what they weigh, and the database size beside them — and
+shorten the retention window. Shortening it deletes the frames outside the new window,
+so the page asks you to confirm and tells you the count first.
 
-```sh
-du -sh /var/lib/garden/frames/*
-```
+The nightly sweep applies each garden's setting automatically; this page is for when
+you do not want to wait for it, or want a different answer for one garden.
 
-Lower the capture rate on the Pi with `GARDEN_FRAME_SECONDS`, or `0` to stop capturing.
+Lowering the capture rate on the Pi with `GARDEN_FRAME_SECONDS` also works, and is the
+better lever if you want the same history over a longer period.
 
 ---
 
@@ -772,6 +776,9 @@ Stated plainly so you do not go looking:
 
 - **No off-site backups.** `/var/lib/garden/backups` is on the same disk as the
   database. Copy it somewhere else.
+- **No disk-free reporting.** The Storage page shows what the garden is *using*, which
+  is the number the retention decision needs. It does not know how much room is left on
+  the volume — `df -h /var/lib/garden` still does.
 - **No HA, no clustering.** One VM. If it is down you get no notifications — but the
   garden keeps running on the Pi's resident schedule.
 - **No metrics stack.** Grafana and VictoriaMetrics would be a reasonable addition; the
