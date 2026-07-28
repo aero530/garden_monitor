@@ -20,10 +20,13 @@ pub struct TankGeometry {
 }
 
 impl TankGeometry {
-    /// Studio 2 ships a "4+ gallon" tank; 15.5 L is a conservative usable figure.
+    /// Gardyn's tank-refresh guide states the Studio holds 4 gallons, and its refill
+    /// procedure is a gallon at a time up to that figure — so 4 × 3.785 L is both the
+    /// published capacity and the volume a refresh actually puts in.
+    ///
     /// Calibration distances are placeholders until Phase 0 measures the real ones.
     pub const STUDIO_2: TankGeometry = TankGeometry {
-        capacity_l: 15.5,
+        capacity_l: 15.14,
         full_distance_mm: 60.0,
         empty_distance_mm: 330.0,
     };
@@ -53,10 +56,22 @@ impl TankGeometry {
 /// correcting them is a data change, not a code change.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct DosingSpec {
+    /// Full-strength plant food, in mL per litre of water.
+    ///
+    /// Gardyn's figure, converted: 1 tsp per gallon at mature/blooming/fruiting, and
+    /// the measuring spoon in the box is marked "1 tsp / 5 mL", so 5 mL ÷ 3.785 L.
     pub food_ml_per_litre: f32,
+    /// HydroBoost, in mL per litre.
+    ///
+    /// Still a plausible starting value: the refresh guide calls it optional and says
+    /// to dose "according to your device type and water source" without publishing a
+    /// rate. Unlike the food figure, this one is not from a source.
     pub conditioner_ml_per_litre: f32,
     /// Germinating seeds are burned by full-strength solution, so the first weeks run
     /// at a reduced rate.
+    ///
+    /// Confirmed against Gardyn's dosing table, which halves the rate to 1/2 tsp per
+    /// gallon for true leaves and vegetative growth.
     pub sprout_dose_fraction: f32,
     /// Conductivity added per mL of food per litre of water, in mS/cm.
     ///
@@ -69,7 +84,8 @@ pub struct DosingSpec {
 impl Default for DosingSpec {
     fn default() -> Self {
         Self {
-            food_ml_per_litre: 2.0,
+            // 1 tsp (5 mL) per US gallon (3.785 L).
+            food_ml_per_litre: 1.32,
             conditioner_ml_per_litre: 1.0,
             sprout_dose_fraction: 0.5,
             ec_per_ml_per_litre: 0.35,
@@ -388,5 +404,36 @@ mod tests {
         tank.consume_water(5.0);
         assert_eq!(tank.volume_l, 0.0);
         assert_eq!(tank.estimated_strength(), 0.0);
+    }
+
+    #[test]
+    fn a_full_refresh_asks_for_the_dose_gardyn_prints_on_the_bottle() {
+        // Gardyn's refresh procedure is "1 gallon at a time, 1 tsp of plant food per
+        // gallon, 4 gallons for a Studio" — so a full mature-stage refresh should come
+        // to 4 tsp, or 20 mL. This is the one place the arithmetic is checkable against
+        // a published figure, so it is worth pinning: a units slip here misfeeds a real
+        // tank, and 2 mL/L (what this used to be) would have asked for 30 mL.
+        let g = TankGeometry::STUDIO_2;
+        let spec = DosingSpec::default();
+        let ml = g.capacity_l * spec.food_ml_per_litre;
+        assert!(
+            (ml - 20.0).abs() < 0.5,
+            "a full Studio refresh wants {ml:.1} mL, not ~20"
+        );
+
+        // And half that for anything still putting out true leaves.
+        let seedling = ml * spec.sprout_dose_fraction;
+        assert!(
+            (seedling - 10.0).abs() < 0.5,
+            "seedling dose is {seedling:.1} mL"
+        );
+    }
+
+    #[test]
+    fn the_studio_tank_holds_the_four_gallons_gardyn_says_it_does() {
+        // Every dose is a rate times this number, so it is upstream of all of them.
+        let litres_per_gallon = 3.785;
+        let gallons = TankGeometry::STUDIO_2.capacity_l / litres_per_gallon;
+        assert!((gallons - 4.0).abs() < 0.02, "tank is {gallons:.2} gallons");
     }
 }

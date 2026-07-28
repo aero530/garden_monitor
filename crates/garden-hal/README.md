@@ -9,7 +9,7 @@ with no Pi in the loop. Most of the work in this project is not hardware work an
 should not be gated on hardware.
 
 ```sh
-cargo test -p garden-hal      # 24 tests
+cargo test -p garden-hal      # 28 tests
 ```
 
 ---

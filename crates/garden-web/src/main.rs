@@ -102,6 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn router(state: AppState) -> Router {
     Router::new()
         .merge(pages::gardens::routes())
+        .merge(pages::guides::routes())
         .merge(pages::auth::routes())
         .merge(pages::members::routes())
         .merge(pages::notify::routes())

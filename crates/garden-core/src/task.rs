@@ -80,6 +80,46 @@ impl TaskKind {
             TaskKind::AddWater | TaskKind::TankRefresh | TaskKind::DeepClean
         )
     }
+
+    /// Every kind, for exhaustive iteration.
+    pub const ALL: [TaskKind; 12] = [
+        TaskKind::AddWater,
+        TaskKind::AddPlantFood,
+        TaskKind::AddConditioner,
+        TaskKind::PruneRoots,
+        TaskKind::PrunePlant,
+        TaskKind::Harvest,
+        TaskKind::Thin,
+        TaskKind::Pollinate,
+        TaskKind::TankRefresh,
+        TaskKind::DeepClean,
+        TaskKind::Replant,
+        TaskKind::Inspect,
+    ];
+
+    /// Recover a kind from its [`label`](Self::label).
+    ///
+    /// The label is what gets persisted, so this is how a stored task finds its way back
+    /// to anything keyed on the enum — the maintenance guides, in particular. Round-trip
+    /// with `label` is pinned by a test, since a reworded label would otherwise break the
+    /// mapping silently.
+    pub fn from_label(label: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.label() == label)
+    }
+
+    /// The maintenance guide covering this task, if one is published.
+    ///
+    /// Only the two big physical jobs have one. Dosing tasks carry the amount in the
+    /// task itself and need no procedure; a refresh or a clean is twenty minutes of
+    /// draining, scrubbing and reassembly that nobody should be recalling from memory.
+    /// The slug resolves through [`crate::guide::GuideBook`].
+    pub fn guide_slug(self) -> Option<&'static str> {
+        match self {
+            TaskKind::TankRefresh => Some(crate::guide::TANK_REFRESH),
+            TaskKind::DeepClean => Some(crate::guide::DEEP_CLEAN),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for TaskKind {
@@ -330,6 +370,41 @@ mod tests {
     }
 
     const R: RuleId = RuleId::from_static("test");
+
+    #[test]
+    fn every_kind_round_trips_through_its_label() {
+        // The label is the persisted form. If a kind stops being recoverable from it —
+        // because a label was reworded, or `ALL` was not updated alongside the enum —
+        // then a stored maintenance task quietly loses its link to the procedure.
+        for kind in TaskKind::ALL {
+            assert_eq!(TaskKind::from_label(kind.label()), Some(kind), "{kind:?}");
+        }
+        assert_eq!(TaskKind::from_label("water the garden"), None);
+    }
+
+    #[test]
+    fn all_lists_every_variant_exactly_once() {
+        let mut labels: Vec<&str> = TaskKind::ALL.iter().map(|k| k.label()).collect();
+        let before = labels.len();
+        labels.sort_unstable();
+        labels.dedup();
+        assert_eq!(
+            labels.len(),
+            before,
+            "a label is used twice, or ALL repeats a kind"
+        );
+    }
+
+    #[test]
+    fn only_the_two_physical_jobs_carry_a_guide() {
+        // A dose is a number the task already states. A refresh or a clean is a
+        // procedure, and those are the two Gardyn actually publishes.
+        let with: Vec<TaskKind> = TaskKind::ALL
+            .into_iter()
+            .filter(|k| k.guide_slug().is_some())
+            .collect();
+        assert_eq!(with, vec![TaskKind::TankRefresh, TaskKind::DeepClean]);
+    }
 
     #[test]
     fn keys_are_stable_and_distinguish_targets() {

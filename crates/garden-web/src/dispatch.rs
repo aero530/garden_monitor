@@ -60,7 +60,10 @@ async fn sweep_garden(
     // task list — that is how someone gets pinged about a tank they filled an hour ago.
     let snapshot = crate::state::build(&state.store, garden, now).await?;
     let evaluation = garden_rules::default_engine().evaluate(&snapshot);
-    state.store.sync_tasks(garden.id, &evaluation.tasks, now).await?;
+    state
+        .store
+        .sync_tasks(garden.id, &evaluation.tasks, now)
+        .await?;
     state.store.prune_notifications(garden.id).await?;
 
     let Some(notifier) = state.notifier.as_ref() else {
@@ -196,19 +199,17 @@ async fn deliver_one(
     task: &TaskRecord,
     now: Timestamp,
 ) -> Result<bool, garden_store::StoreError> {
-    let last = state.store.last_notified(garden.id, user.id, &task.key).await?;
-    let decision = decide(
-        task.severity,
-        last,
-        prefs.quiet,
-        prefs.local_hour(now),
-        now,
-    );
+    let last = state
+        .store
+        .last_notified(garden.id, user.id, &task.key)
+        .await?;
+    let decision = decide(task.severity, last, prefs.quiet, prefs.local_hour(now), now);
     if !decision.should_send() {
         return Ok(false);
     }
 
-    let kind = parse_kind(&task.kind).unwrap_or(TaskKind::Inspect);
+    // The store keeps the kind as its display label; map it back for the icon.
+    let kind = TaskKind::from_label(&task.kind).unwrap_or(TaskKind::Inspect);
     let reach = reach_for(task.severity);
 
     // One-tap buttons. Each is a single-use grant scoped to this person and this task,
@@ -223,7 +224,7 @@ async fn deliver_one(
         task.detail.as_deref(),
         task.severity,
         reach.priority,
-        Some(format!("{}/gardens/{}", state.config.base_url, garden.id)),
+        Some(tap_target(&state.config.base_url, garden.id, kind)),
         actions,
     );
 
@@ -263,6 +264,20 @@ async fn deliver_one(
     Ok(true)
 }
 
+/// Where tapping the notification body lands.
+///
+/// The garden page, except for the two jobs that are physical work — for those, the
+/// procedure. All three action buttons are already spoken for (Done, Snooze, N/A) and
+/// ntfy sends at most three, so the body tap is the only slot left, and "how do I do
+/// this" is the question a *refresh tank* notification actually raises. Nothing is lost:
+/// the buttons still complete the task without opening anything.
+fn tap_target(base_url: &str, garden: garden_core::GardenId, kind: TaskKind) -> String {
+    match kind.guide_slug() {
+        Some(slug) => format!("{base_url}/guides/{slug}"),
+        None => format!("{base_url}/gardens/{garden}"),
+    }
+}
+
 async fn build_actions(
     state: &AppState,
     user: garden_auth::UserId,
@@ -288,26 +303,6 @@ async fn build_actions(
     Ok(actions)
 }
 
-/// `TaskRecord` stores the kind as its display label; map it back for the icon.
-fn parse_kind(label: &str) -> Option<TaskKind> {
-    [
-        TaskKind::AddWater,
-        TaskKind::AddPlantFood,
-        TaskKind::AddConditioner,
-        TaskKind::PruneRoots,
-        TaskKind::PrunePlant,
-        TaskKind::Harvest,
-        TaskKind::Thin,
-        TaskKind::Pollinate,
-        TaskKind::TankRefresh,
-        TaskKind::DeepClean,
-        TaskKind::Replant,
-        TaskKind::Inspect,
-    ]
-    .into_iter()
-    .find(|k| k.label() == label)
-}
-
 /// Everything too quiet to interrupt about, for the daily brief.
 pub fn brief_lines(tasks: &[TaskRecord], now: Timestamp) -> Vec<String> {
     tasks
@@ -326,30 +321,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_task_kind_round_trips_through_its_label() {
-        // The dispatcher recovers the kind from stored display text to pick an icon;
-        // a miss would silently degrade every notification to the generic one.
-        for kind in [
-            TaskKind::AddWater,
-            TaskKind::AddPlantFood,
-            TaskKind::AddConditioner,
-            TaskKind::PruneRoots,
-            TaskKind::PrunePlant,
-            TaskKind::Harvest,
-            TaskKind::Thin,
-            TaskKind::Pollinate,
-            TaskKind::TankRefresh,
-            TaskKind::DeepClean,
-            TaskKind::Replant,
-            TaskKind::Inspect,
-        ] {
-            assert_eq!(parse_kind(kind.label()), Some(kind), "{kind} did not survive");
-        }
+    fn maintenance_notifications_open_the_procedure_and_others_the_garden() {
+        let garden = garden_core::GardenId::new();
+        let base = "https://garden.example.ts.net";
+        assert_eq!(
+            tap_target(base, garden, TaskKind::TankRefresh),
+            format!("{base}/guides/tank-refresh")
+        );
+        assert_eq!(
+            tap_target(base, garden, TaskKind::DeepClean),
+            format!("{base}/guides/deep-clean")
+        );
+        // A dose states its own amount; the garden page is where you act on it.
+        assert_eq!(
+            tap_target(base, garden, TaskKind::AddPlantFood),
+            format!("{base}/gardens/{garden}")
+        );
     }
 
     #[test]
-    fn an_unknown_label_does_not_panic() {
-        assert_eq!(parse_kind("something we renamed"), None);
+    fn an_unrecognised_stored_kind_still_notifies() {
+        // A label this build does not know — a downgrade, or a renamed variant — must
+        // not silence the reminder. `Inspect` is the honest fallback: something needs
+        // eyes on it. The exhaustive round-trip lives in `garden_core::task`.
+        assert_eq!(TaskKind::from_label("something we renamed"), None);
     }
 
     #[test]

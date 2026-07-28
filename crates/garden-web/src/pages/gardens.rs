@@ -48,8 +48,7 @@ pub async fn authorize(
 
 async fn list(State(state): State<AppState>, Auth(actor): Auth) -> Result<Markup, AppError> {
     let listings = state.store.gardens_for_user(actor.id()).await?;
-    let (mine, shared): (Vec<_>, Vec<_>) =
-        listings.iter().partition(|l| l.role == Role::Owner);
+    let (mine, shared): (Vec<_>, Vec<_>) = listings.iter().partition(|l| l.role == Role::Owner);
 
     Ok(ui::page(
         "Gardens",
@@ -476,6 +475,14 @@ fn slots(state: &GardenState) -> Markup {
     }
 }
 
+/// The maintenance guide for a stored task, if it has one.
+///
+/// Goes through the label, because that is the form the store keeps — the round-trip is
+/// pinned by a test in `garden_core::task`.
+fn guide_slug(task: &TaskRecord) -> Option<&'static str> {
+    garden_core::TaskKind::from_label(&task.kind).and_then(|kind| kind.guide_slug())
+}
+
 fn task_card(task: &TaskRecord, garden: GardenId, can_act: bool, now: jiff::Timestamp) -> Markup {
     html! {
         div.card {
@@ -503,6 +510,13 @@ fn task_card(task: &TaskRecord, garden: GardenId, can_act: bool, now: jiff::Time
                 }
             }
             p.small style="margin:0.5rem 0 0" { (task.rationale) }
+            // A refresh or a deep clean is twenty minutes of physical work, so the task
+            // carries the procedure rather than assuming it is remembered.
+            @if let Some(slug) = guide_slug(task) {
+                p.small style="margin:0.4rem 0 0" {
+                    a href=(format!("/guides/{slug}")) { "How to do this →" }
+                }
+            }
             p.small.muted style="margin:0.25rem 0 0" {
                 @if let Some(detail) = &task.detail { (detail) " · " }
                 "from " code { (task.source_rule) }

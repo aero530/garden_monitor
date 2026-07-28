@@ -8,7 +8,7 @@ and two processes fighting over the same PWM pin is an excellent way to cook a t
 seedlings. `--own-actuators` is what changes that, and it is not a default.
 
 ```sh
-cargo test -p garden-edge     # 28 tests, all runnable on a desktop
+cargo test -p garden-edge     # 48 tests, all runnable on a desktop
 ```
 
 The full procedure — imaging the SD card, getting a shell, wiring the probe — is

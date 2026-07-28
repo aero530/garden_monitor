@@ -17,7 +17,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/account/notifications", get(page).post(save))
         .route("/account/notifications/calendar", post(issue_calendar))
-        .route("/account/notifications/calendar/revoke", post(revoke_calendar))
+        .route(
+            "/account/notifications/calendar/revoke",
+            post(revoke_calendar),
+        )
         .route("/calendar/{token}/feed.ics", get(calendar_feed))
 }
 
@@ -212,6 +215,12 @@ async fn revoke_calendar(
 
 /// The feed itself.
 ///
+/// The absolute URL of the guide for a stored task kind, if it has one.
+fn guide_url(base_url: &str, kind_label: &str) -> Option<String> {
+    let slug = garden_core::TaskKind::from_label(kind_label)?.guide_slug()?;
+    Some(format!("{base_url}/guides/{slug}"))
+}
+
 /// The only route where a bearer secret substitutes for a session, because a calendar
 /// client cannot log in. It is scoped tightly: read-only, and only the tasks of
 /// gardens that person is already a member of.
@@ -248,7 +257,13 @@ async fn calendar_feed(
                     Some(detail) => format!("{} ({}) — {}", task.kind, detail, listing.garden.name),
                     None => format!("{} — {}", task.kind, listing.garden.name),
                 },
-                description: task.rationale.clone(),
+                // A calendar entry has no buttons, so the link to the procedure has to
+                // go in the text. Worth the two lines: a refresh reminder that surfaces
+                // in a calendar a week out is exactly when you want the steps.
+                description: match guide_url(&state.config.base_url, &task.kind) {
+                    Some(url) => format!("{}\n\nHow to do this: {url}", task.rationale),
+                    None => task.rationale.clone(),
+                },
                 due: task.due_at,
                 severity: task.severity,
             });

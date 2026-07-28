@@ -23,7 +23,9 @@ pub use engine::{
 };
 
 use harvest::{HarvestByCalendarRule, HarvestByCanopyRule, ReplantRule};
-use maintenance::{DeepCleanByCalendarRule, DeepCleanByFoulingRule, TankRefreshRule};
+use maintenance::{
+    DeepCleanByCalendarRule, DeepCleanByFoulingRule, TankRefreshByChlorosisRule, TankRefreshRule,
+};
 use nutrients::{
     ConditionerByAlgaeRule, ConditionerRule, PlantFoodByEcRule, PlantFoodByVolumeRule,
 };
@@ -65,6 +67,7 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(PollinationRule),
         // Maintenance
         Box::new(TankRefreshRule),
+        Box::new(TankRefreshByChlorosisRule),
         Box::new(DeepCleanByCalendarRule),
         Box::new(DeepCleanByFoulingRule),
         // Root-zone chemistry
@@ -122,7 +125,7 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), before, "duplicate rule id registered");
-        assert_eq!(before, 21);
+        assert_eq!(before, 22);
     }
 
     #[test]
@@ -137,7 +140,11 @@ mod tests {
     fn every_task_carries_a_rationale_and_a_source() {
         let eval = default_engine().evaluate(&neglected());
         for task in &eval.tasks {
-            assert!(!task.rationale.is_empty(), "{:?} has no rationale", task.kind);
+            assert!(
+                !task.rationale.is_empty(),
+                "{:?} has no rationale",
+                task.kind
+            );
             assert!(!task.source.as_str().is_empty());
         }
     }
@@ -149,7 +156,11 @@ mod tests {
         let before = keys.len();
         keys.sort();
         keys.dedup();
-        assert_eq!(keys.len(), before, "duplicate task keys reached the operator");
+        assert_eq!(
+            keys.len(),
+            before,
+            "duplicate task keys reached the operator"
+        );
     }
 
     #[test]
@@ -179,7 +190,10 @@ mod tests {
             .iter()
             .filter(|s| matches!(s.reason, SuppressionReason::MissingCapabilities(_)))
             .collect();
-        assert!(hardware_gaps.is_empty(), "unexpected gaps: {hardware_gaps:?}");
+        assert!(
+            hardware_gaps.is_empty(),
+            "unexpected gaps: {hardware_gaps:?}"
+        );
     }
 
     #[test]
@@ -252,7 +266,9 @@ mod advisory_only {
             metrics.plant_count = Some(2);
             plain.slot_metrics.insert(slot, metrics);
         }
-        plain.capabilities.insert(garden_core::Capability::CanopyMetrics);
+        plain
+            .capabilities
+            .insert(garden_core::Capability::CanopyMetrics);
 
         let mut diagnosed = plain.clone();
         for metrics in diagnosed.slot_metrics.values_mut() {

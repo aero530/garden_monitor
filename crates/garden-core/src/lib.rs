@@ -11,6 +11,7 @@
 
 pub mod capability;
 pub mod garden;
+pub mod guide;
 pub mod planting;
 pub mod sensors;
 pub mod slot;
@@ -23,6 +24,7 @@ pub mod vision;
 
 pub use capability::{Capability, CapabilitySet};
 pub use garden::{DeviceModel, Garden, GardenId};
+pub use guide::{Guide, GuideBook, GuideSection};
 pub use planting::{Planting, PlantingId, Stage};
 pub use sensors::{PumpBaseline, SensorSnapshot, ewma};
 pub use slot::{Geometry, LightZone, SlotId, SlotPosition};

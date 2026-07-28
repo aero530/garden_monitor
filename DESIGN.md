@@ -295,9 +295,16 @@ is why they are not Cargo features.
 
 ## 8. Rules catalog
 
-From the documented Gardyn care cycle — top off weekly, refresh tank monthly,
-HydroBoost with every top-off and refresh, root check every 2–4 weeks, thin during
-weeks 2–6, deep clean annually — plus sensor-derived triggers.
+From the documented Gardyn care cycle — top off weekly, refresh the tank at least
+every 4 weeks, HydroBoost with every top-off and refresh, root check every 2–4 weeks,
+thin during weeks 2–6 — plus sensor-derived triggers.
+
+Gardyn publishes **no** cleaning interval: a deep clean is driven by conditions
+(algae, root pieces, salt deposits, pests, or a planned break from growing), so the
+measured signal leads there and the annual entry below is only a backstop for a garden
+with no pump sensor fitted. Both procedures are quoted verbatim in
+`garden-core/data/maintenance-guides.json` and served at `/guides`, so a reminder can
+link to the steps rather than assuming they are remembered.
 
 | Task | Calendar trigger | Measured trigger |
 |---|---|---|
@@ -307,7 +314,8 @@ weeks 2–6, deep clean annually — plus sensor-derived triggers.
 | Prune roots | every 2–4 weeks per planting | pump current ↑, consumption ↓ |
 | Prune plants | variety flag + age | canopy area threshold, neighbor shading |
 | Harvest | days-to-harvest, cut-and-come-again cadence | canopy area, bolting risk from heat |
-| Clean / refresh | monthly; annual deep clean | pump profile, biofilm (weighted down for No-Clean Columns) |
+| Tank refresh | every 4 weeks, 7 days' notice | widespread measured chlorosis pulls it forward |
+| Deep clean | *none published*; annual backstop | pump restriction profile (weighted down for No-Clean Columns) |
 | Thin | weeks 2–6 → 1/yCube, 3 for herbs | seedling count from vision |
 | Pollinate | fruiting varieties in flower | flower detection |
 | Replant | end of productive life | growth curve plateau |
@@ -476,7 +484,7 @@ Green outlines are the four binaries; the rest are libraries.
 |---|---|---|
 | `garden-core` | Domain types and the variety book. No I/O at all. | everywhere |
 | `garden-hal` | Traits for sensors and actuators, plus the duty-cycle failsafes | Pi, simulator |
-| `garden-rules` | 21 rules and the capability/precedence engine | brain, simulator |
+| `garden-rules` | 22 rules and the capability/precedence engine | brain, simulator |
 | `garden-auth` | Accounts, roles, garden sharing, sessions, signed action links | brain |
 | `garden-proto` | Wire format shared by the agent and the brain | Pi, brain |
 | `garden-notify` | ntfy, SMTP and iCal adapters, plus the delivery policy | brain |
@@ -574,7 +582,8 @@ once the rest is proven and a rollback has been rehearsed.
 - [CISA ICSA-26-055-03 — Gardyn Home Kit](https://www.cisa.gov/news-events/ics-advisories/icsa-26-055-03)
 - [SecurityWeek — Critical Flaws Exposed Gardyn Smart Gardens](https://www.securityweek.com/critical-flaws-exposed-gardyn-smart-gardens-to-remote-hacking/)
 - [Gardyn — Getting to Know Your Gardyn's Care Cycle](https://help.mygardyn.com/en/articles/1772865)
-- [Gardyn — Tank Refresh Guide](https://help.mygardyn.com/en/articles/1788097)
+- [Gardyn — Tank Refresh Guide](https://help.mygardyn.com/en/articles/1788097) — cadence, dosing table, and the refresh procedure quoted in `maintenance-guides.json`
+- [Gardyn — How to Deep Clean Your Gardyn](https://help.mygardyn.com/en/articles/6166337) — the cleaning procedure, and the conditions that call for one
 - [Gardyn — How the Gardyn's Cameras Work](https://help.mygardyn.com/en/articles/1773313)
 - [Gardyn Studio 2 product page](https://mygardyn.com/product/gardyn-studio-gen2/)
 - [Gardyn — Security update](https://mygardyn.com/blog/security-update/)

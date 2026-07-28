@@ -4,7 +4,7 @@ SQLite persistence, plus the task lifecycle that the stateless rule engine delib
 does not own.
 
 ```sh
-cargo test -p garden-store    # 133 tests, 65 of them against a real database
+cargo test -p garden-store    # 141 tests, 65 of them against a real database
 ```
 
 Queries are **runtime-checked**, not `sqlx::query!`-macro-checked. That means no

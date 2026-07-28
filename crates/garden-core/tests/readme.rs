@@ -5,7 +5,8 @@
 //! and means the build catches the drift.
 
 use garden_core::{
-    Capability, CapabilitySet, Severity, Target, TaskKey, TaskKind, VarietyBook, VarietyId,
+    Capability, CapabilitySet, GuideBook, Severity, Target, TaskKey, TaskKind, VarietyBook,
+    VarietyId,
 };
 
 #[test]
@@ -46,4 +47,20 @@ fn the_variety_book_carries_gardens_own_words() {
 
     assert_eq!(basil.germination_days, 13);
     assert!(basil.care.iter().any(|p| p.contains("bolting")));
+}
+
+#[test]
+fn a_maintenance_reminder_carries_the_procedure() {
+    let book = GuideBook::published();
+
+    // A dose already states its own amount; a refresh is a procedure.
+    assert_eq!(TaskKind::AddPlantFood.guide_slug(), None);
+    let refresh = book.for_task(TaskKind::TankRefresh).unwrap();
+
+    // Gardyn's own words, not a paraphrase — these steps involve household chemicals.
+    assert!(refresh.procedure().any(|s| s.title.contains("Drain and Clean")));
+    assert_eq!(refresh.source, "https://help.mygardyn.com/en/articles/1788097");
+
+    // Sections about Gardyn's *own* app are kept for reference but stay out of the steps.
+    assert!(refresh.procedure().all(|s| !s.about_vendor_app));
 }

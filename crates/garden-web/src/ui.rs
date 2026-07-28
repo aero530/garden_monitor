@@ -41,6 +41,7 @@ fn nav(actor: &Actor) -> Markup {
             div.spacer {}
             a href="/" { "Gardens" }
             a href="/varieties" { "Plants" }
+            a href="/guides" { "Maintenance" }
             @if actor.is_admin() {
                 a href="/system" { "System" }
             }

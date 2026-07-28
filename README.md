@@ -30,7 +30,7 @@ that cross-compiles for the Pi and is off by default until Phase 6.
 flowchart TD
   core["<b>garden-core</b><br/>domain types, zero I/O"]
   hal["<b>garden-hal</b><br/>sensor + actuator traits"]
-  rules["<b>garden-rules</b><br/>21 rules + capability engine"]
+  rules["<b>garden-rules</b><br/>22 rules + capability engine"]
   auth["<b>garden-auth</b><br/>accounts, roles, sharing"]
   proto["<b>garden-proto</b><br/>edge ↔ brain wire format"]
   notify["<b>garden-notify</b><br/>ntfy · SMTP · iCal"]
@@ -63,18 +63,18 @@ worked examples, and — for the hardware crates — pinouts.
 
 | Crate | | Tests |
 |---|---|---|
-| [garden-core](crates/garden-core/) | domain types, 135-variety plant book, zero I/O | 83 |
-| [garden-hal](crates/garden-hal/) | hardware traits, schedule, failsafe handover | 24 |
+| [garden-core](crates/garden-core/) | domain types, 135-variety plant book, maintenance guides, zero I/O | 97 |
+| [garden-hal](crates/garden-hal/) | hardware traits, schedule, failsafe handover | 28 |
 | [garden-proto](crates/garden-proto/) | wire format shared by agent and brain | 12 |
-| [garden-rules](crates/garden-rules/) | 21 rules + capability engine | 87 |
+| [garden-rules](crates/garden-rules/) | 22 rules + capability engine | 116 |
 | [garden-auth](crates/garden-auth/) | accounts, roles, sharing, signed links | 78 |
 | [garden-notify](crates/garden-notify/) | ntfy, SMTP, iCal + delivery policy | 44 |
-| [garden-store](crates/garden-store/) | SQLite persistence + frame storage | 133 |
+| [garden-store](crates/garden-store/) | SQLite persistence + frame storage | 141 |
 | [garden-vision](crates/garden-vision/) | frame → canopy, chlorosis, seedling counts | 68 |
 | [garden-sim](crates/garden-sim/) | physics model + season runner | 32 |
-| [garden-cli](crates/garden-cli/) | calibration, event logging, rule replay | 39 |
-| [garden-web](crates/garden-web/) | axum + maud application, agent API | 58 |
-| [garden-edge](crates/garden-edge/) | Pi agent: recon, telemetry, camera | 28 |
+| [garden-cli](crates/garden-cli/) | calibration, event logging, rule replay | 41 |
+| [garden-web](crates/garden-web/) | axum + maud application, agent API | 92 |
+| [garden-edge](crates/garden-edge/) | Pi agent: recon, telemetry, camera | 48 |
 | [garden-guard](crates/garden-guard/) | heartbeat supervisor, failsafe | 10 |
 
 ## Plantings

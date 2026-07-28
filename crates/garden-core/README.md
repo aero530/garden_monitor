@@ -8,7 +8,7 @@ parameter rather than being read, which is what lets `garden-sim` run a 120-day 
 in a few milliseconds and lets every rule be tested without a fixture.
 
 ```sh
-cargo test -p garden-core     # 79 tests
+cargo test -p garden-core     # 97 tests
 ```
 
 ---
@@ -118,6 +118,33 @@ let basil = book.get(&VarietyId::new("basil")).unwrap();
 
 assert_eq!(basil.germination_days, 13);
 assert!(basil.care.iter().any(|p| p.contains("bolting")));
+```
+
+### 5. A maintenance reminder carries the procedure
+
+Two of the tasks the rules raise are not a measured dose — a tank refresh and a deep
+clean are twenty minutes with a towel on the floor. Both procedures are transcribed
+verbatim into [`data/maintenance-guides.json`](data/maintenance-guides.json) and reached
+through [`GuideBook`](src/guide.rs), so the reminder can link to the steps instead of
+assuming they are remembered.
+
+`TaskKind::guide_slug` is the join, and only those two kinds have one:
+
+```rust
+use garden_core::{GuideBook, TaskKind};
+
+let book = GuideBook::published();
+
+// A dose already states its own amount; a refresh is a procedure.
+assert_eq!(TaskKind::AddPlantFood.guide_slug(), None);
+let refresh = book.for_task(TaskKind::TankRefresh).unwrap();
+
+// Gardyn's own words, not a paraphrase — these steps involve household chemicals.
+assert!(refresh.procedure().any(|s| s.title.contains("Drain and Clean")));
+assert_eq!(refresh.source, "https://help.mygardyn.com/en/articles/1788097");
+
+// Sections about Gardyn's *own* app are kept for reference but stay out of the steps.
+assert!(refresh.procedure().all(|s| !s.about_vendor_app));
 ```
 
 Every example on this page is executed by

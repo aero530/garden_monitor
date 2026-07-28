@@ -385,9 +385,17 @@ mod tests {
         let mut g = garden_with("kale-lacinato", 5.0); // seedling
         g.tank.litres_added_since_food_dose = 4.0;
         let tasks = food_engine().evaluate(&g).tasks;
+        // Derived from the spec rather than written out, so correcting a published
+        // dosing figure does not require editing this test. The figure itself is pinned
+        // against Gardyn's tsp-per-gallon table in `garden_core::tank`.
+        let expected = 4.0 * g.dosing.food_ml_per_litre * g.dosing.sprout_dose_fraction;
         match tasks[0].detail {
-            // 4 L * 2 mL/L * 0.5 sprout fraction
-            Some(TaskDetail::Dose { millilitres }) => assert!((millilitres - 4.0).abs() < 0.01),
+            Some(TaskDetail::Dose { millilitres }) => {
+                assert!(
+                    (millilitres - expected).abs() < 0.01,
+                    "{millilitres} vs {expected}"
+                )
+            }
             other => panic!("expected a dose, got {other:?}"),
         }
         assert!(tasks[0].rationale.contains("sprout strength"));
@@ -398,8 +406,16 @@ mod tests {
         let mut g = garden_with("kale-lacinato", 40.0); // mature
         g.tank.litres_added_since_food_dose = 4.0;
         let tasks = food_engine().evaluate(&g).tasks;
+        // Full strength is exactly twice the sprout dose above, which is the whole
+        // distinction this pair of tests exists to check.
+        let expected = 4.0 * g.dosing.food_ml_per_litre;
         match tasks[0].detail {
-            Some(TaskDetail::Dose { millilitres }) => assert!((millilitres - 8.0).abs() < 0.01),
+            Some(TaskDetail::Dose { millilitres }) => {
+                assert!(
+                    (millilitres - expected).abs() < 0.01,
+                    "{millilitres} vs {expected}"
+                )
+            }
             other => panic!("expected a dose, got {other:?}"),
         }
     }
@@ -450,7 +466,10 @@ mod tests {
         let mut g = garden_with("kale-lacinato", 40.0);
         g.capabilities.insert(Capability::Conductivity);
         g.sensors.ec_ms_cm = Some(0.2);
-        assert_eq!(food_engine().evaluate(&g).tasks[0].severity, Severity::Urgent);
+        assert_eq!(
+            food_engine().evaluate(&g).tasks[0].severity,
+            Severity::Urgent
+        );
     }
 
     #[test]
@@ -482,7 +501,11 @@ mod tests {
         g.sensors.ec_ms_cm = Some(0.5);
 
         let tasks = food_engine().evaluate(&g).tasks;
-        assert!(tasks[0].rationale.contains("compromise"), "{}", tasks[0].rationale);
+        assert!(
+            tasks[0].rationale.contains("compromise"),
+            "{}",
+            tasks[0].rationale
+        );
     }
 
     #[test]
@@ -490,7 +513,9 @@ mod tests {
         let mut g = garden_with("kale-lacinato", 40.0);
         g.tank.last_conditioner = Some(add_days(t0(), -3.0));
         g.tank.last_top_off = Some(add_days(t0(), -1.0));
-        let tasks = Engine::new(vec![Box::new(ConditionerRule)]).evaluate(&g).tasks;
+        let tasks = Engine::new(vec![Box::new(ConditionerRule)])
+            .evaluate(&g)
+            .tasks;
         assert_eq!(tasks.len(), 1);
         assert!(tasks[0].rationale.contains("without conditioner"));
     }
@@ -500,7 +525,12 @@ mod tests {
         let mut g = garden_with("kale-lacinato", 40.0);
         g.tank.last_top_off = Some(add_days(t0(), -2.0));
         g.tank.last_conditioner = Some(add_days(t0(), -2.0));
-        assert!(Engine::new(vec![Box::new(ConditionerRule)]).evaluate(&g).tasks.is_empty());
+        assert!(
+            Engine::new(vec![Box::new(ConditionerRule)])
+                .evaluate(&g)
+                .tasks
+                .is_empty()
+        );
     }
 
     #[test]

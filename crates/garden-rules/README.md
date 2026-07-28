@@ -7,7 +7,7 @@ isolation, and it means months of recorded history can be replayed against a mod
 rule to see what it *would* have said.
 
 ```sh
-cargo test -p garden-rules    # 107 tests
+cargo test -p garden-rules    # 116 tests
 ```
 
 ---
@@ -139,8 +139,8 @@ already told you.
 | `Harvest` | `harvest-by-calendar` — days from the variety book | `harvest-by-canopy` — canopy area vs threshold |
 | `Thin` | `thin-by-calendar` | `thin-by-segmentation` — seedling count |
 | `PrunePlant` | `prune-plant-cadence` | `prune-plant-by-canopy` |
-| `DeepClean` | `deep-clean-by-calendar` | `deep-clean-by-fouling` — pump baseline drift |
-| `TankRefresh` | `tank-refresh` | — |
+| `DeepClean` | `deep-clean-by-calendar` — annual backstop only | `deep-clean-by-fouling` — pump baseline drift |
+| `TankRefresh` | `tank-refresh` — every 4 weeks, 7 days' notice | `tank-refresh-by-chlorosis` — widespread measured yellowing |
 | `Replant` | `replant` — end of productive life | — |
 | `Inspect` | `germination-check`, `pollinate` | `root-zone-temperature`, `solution-ph` |
 

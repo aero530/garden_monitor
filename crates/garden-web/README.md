@@ -10,7 +10,7 @@ is a form post. The whole front end ships inside the binary and still works afte
 months of neglect.
 
 ```sh
-cargo test -p garden-web      # 58 tests
+cargo test -p garden-web      # 92 tests
 
 GARDEN_INSECURE_COOKIES=1 \
 GARDEN_AGENT_TOKEN=$(openssl rand -hex 32) \
@@ -110,6 +110,7 @@ someone can be asked to complete.
 | `/gardens/{id}/schedule` | the light and pump programme the Pi runs |
 | `/gardens/{id}/storage` | frames held, disk used, and how long to keep them |
 | `/varieties`, `/varieties/{id}` | the plant book — Gardyn's own care text |
+| `/guides`, `/guides/{slug}` | how to refresh the tank and how to deep clean, quoted from Gardyn |
 | `/account/notifications` | ntfy topic, UTC offset, quiet hours, calendar link |
 | `/system` | fleet health. Administrators only, and **garden contents are not on it** |
 | `/a/{token}` | one-tap Done / Snooze / N-A from a notification |

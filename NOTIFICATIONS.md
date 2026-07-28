@@ -40,6 +40,14 @@ inside a week.
 | **Email** | Same, links as plain text | Best effort — see [Email](#email-optional) |
 | **Calendar** | Scheduled work as an iCal feed | Read-only, subscribe once |
 
+**Tapping the notification body** opens the garden dashboard — except for a tank refresh
+or a deep clean, which open the procedure at `/guides/…` instead. Those two are twenty
+minutes of physical work rather than a stated dose, so "how do I do this" is the question
+the notification actually raises, and the three buttons still complete the task without
+opening anything. ntfy sends at most three action buttons, all of which are already
+spoken for, so the body tap is the only slot left. The calendar feed has no buttons at
+all, so it carries the same link in the entry description.
+
 ### When each one fires
 
 | Severity | Push | Email | Interrupts? |

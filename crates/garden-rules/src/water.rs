@@ -132,7 +132,9 @@ mod tests {
     }
 
     fn eval(state: &GardenState) -> Vec<Task> {
-        Engine::new(vec![Box::new(WaterLevelRule)]).evaluate(state).tasks
+        Engine::new(vec![Box::new(WaterLevelRule)])
+            .evaluate(state)
+            .tasks
     }
 
     #[test]
@@ -166,9 +168,14 @@ mod tests {
 
     #[test]
     fn the_task_says_how_much_to_add() {
-        let tasks = eval(&garden(4.0, 1.0));
+        let g = garden(4.0, 1.0);
+        let tasks = eval(&g);
+        // Fill it, so the amount is whatever the tank is short of capacity.
+        let expected = g.tank_geometry.capacity_l - 4.0;
         match tasks[0].detail {
-            Some(TaskDetail::Water { litres }) => assert!((litres - 11.5).abs() < 0.01),
+            Some(TaskDetail::Water { litres }) => {
+                assert!((litres - expected).abs() < 0.01, "{litres} vs {expected}")
+            }
             other => panic!("expected a water quantity, got {other:?}"),
         }
     }

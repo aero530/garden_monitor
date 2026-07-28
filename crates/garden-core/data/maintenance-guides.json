@@ -1,0 +1,326 @@
+{
+ "_source": "https://help.mygardyn.com — Gardyn's own maintenance guides",
+ "_note": "Transcribed verbatim from Gardyn's help centre. These are procedures for handling live plants and a mains-powered device, so they are quoted rather than summarised. Regenerate with scratchpad/extract_guides.py.",
+ "guides": {
+  "tank-refresh": {
+   "title": "Tank refresh",
+   "source": "https://help.mygardyn.com/en/articles/1788097",
+   "lede": [],
+   "sections": [
+    {
+     "anchor": "what_is_a_tank_refresh",
+     "title": "What is a Tank Refresh?",
+     "body": [
+      "A Tank Refresh means fully draining your Gardyn tank, cleaning it, and refilling it with fresh water mixed with the correct plant food dose.",
+      "It resets your nutrient baseline and keeps your plants growing in balanced, stable conditions."
+     ],
+     "list": false,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "at_a_glance",
+     "title": "At a glance",
+     "body": [
+      "What: Full drain, clean and refill with fresh water and plant food.",
+      "When: At least every 4 weeks",
+      "Goal: Restore clean, balanced nutrient conditions",
+      "Tank size:",
+      "Gardyn Home= 5 gallons",
+      "Gardyn Studio= 4 gallons",
+      "Plant food per 1 gallon (dose for your current growth stage):",
+      "True leaves/Vegetative Growth; 1/2 tsp per gallon",
+      "Mature/Blooming/Fruiting: 1 tsp per gallon"
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "how_you_know_its_time",
+     "title": "How you know its time:",
+     "body": [
+      "Your Gardyn app is designed to help you stay on track with your monthly Tank Refresh."
+     ],
+     "list": false,
+     "about_vendor_app": true
+    },
+    {
+     "anchor": "water_widget",
+     "title": "Water Widget",
+     "body": [
+      "The Water controls widget on the app home screen shows the Tank Refresh reminders for all Gardyners, regardless of whether that device has a active membership:",
+      "Visible 7 days before due date",
+      "Orange icon= coming soon",
+      "Red icon= due or overdue",
+      "Tap the Water widget to view instructions and mark the task complete."
+     ],
+     "list": true,
+     "about_vendor_app": true
+    },
+    {
+     "anchor": "kelby_task",
+     "title": "Kelby Task",
+     "body": [
+      "If you have an active membership, Kelby will also send you a Tank Refresh task in the app when its time. Complete the refresh and log the date directly in the task."
+     ],
+     "list": false,
+     "about_vendor_app": true
+    },
+    {
+     "anchor": "when_to_refresh",
+     "title": "When to Refresh",
+     "body": [
+      "At least every 4 weeks",
+      "Sooner if you notice:",
+      "Yellowing leaves",
+      "Leaf edge burn",
+      "Yellowing between leaf veins",
+      "Over time, plants absorb water and nutrients at different rates. Even with weekly top offs, nutrient ratios can drift. A monthly refresh resets your system back to a clean, stable baseline."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "1_prep_your_gardyn",
+     "title": "1. Prep Your Gardyn",
+     "body": [
+      "Switch off and unplug",
+      "Place a towel on the floor",
+      "Lift the pump to the upper position",
+      "Unlock the lid locks",
+      "If you have a Gardyn Dolly, position it nearby to safely move your tank closer to a sink."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "2_lift_by_the_columns_not_the_lights",
+     "title": "2. Lift by the Columns (not the lights)",
+     "body": [
+      "Stand your Gardyn’s upper half on the towel."
+     ],
+     "list": false,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "3_drain_and_clean_your_tank",
+     "title": "3. Drain and Clean Your Tank",
+     "body": [
+      "Pour out existing water",
+      "Clean with water, a soft sponge, and a sprinkle of baking soda",
+      "No soap needed",
+      "Wipe down the lid, tank, and columns as you go.",
+      "Safety note:",
+      "Do not lift a full tank. Use a siphon, jug, or container to remove water first. Lift only when the tank feels safe for you to move."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "4_refill_with_fresh_water_plant_food_1_gallon_at_a_time",
+     "title": "4. Refill with Fresh Water + Plant Food (1 Gallon at a Time)",
+     "body": [
+      "Fill a clean 1-gallon container with warm tap water. Add the correct Plant Food dose for your plants’ current growth stage. Shake to mix, then pour into the tank.",
+      "You can use:",
+      "The white measuring spoon (1 tsp / 5 mL) included in your box",
+      "The Gardyn Adjustable Spoon designed for common Gardyn dosages",
+      "Tip: Clean, food-grade 1-gallon containers (like water jugs or milk cartons) work well."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "5_repeat_until_full",
+     "title": "5. Repeat Until Full",
+     "body": [
+      "Gardyn Home: 5 gallons total",
+      "Gardyn Studio: 4 gallons total",
+      "Optional: Add HydroBoost according to your device type and water source."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "6_reattach_your_gardyn",
+     "title": "6. Reattach Your Gardyn",
+     "body": [
+      "Lift by the columns to replace the top half onto the tank. Lower the pump and lock the lid."
+     ],
+     "list": false,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "7_plug_in_and_turn_on",
+     "title": "7. Plug In and Turn On",
+     "body": [
+      "Your Gardyn may take about 5 minutes to reboot. Do not press the silver button. The lights will resume their schedule."
+     ],
+     "list": false,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "8_log_your_tank_refresh_in_the_app",
+     "title": "8. Log Your Tank Refresh in the App",
+     "body": [
+      "After completing your refresh, log the date in the app to keep your reminders accurate.",
+      "Your Tank Refresh countdown resets to 28 days from the date you select.",
+      "With membership, you can view your next due date anytime in the Task Center.",
+      "Logging ensures your monthly schedule stays aligned and helps you maintain a consistent nutrient balance."
+     ],
+     "list": true,
+     "about_vendor_app": true
+    },
+    {
+     "anchor": "why_tank_refresh_matters_in_the_nutrient_lifecycle",
+     "title": "Why Tank Refresh Matters in the Nutrient Lifecycle",
+     "body": [
+      "Your plants perform best when they start from a clean, full, correctly dosed tank baseline.",
+      "Tank top-offs (short-term maintenance): Add water and plant food gallon by gallon to keep your tank consistently full as plants consume it.",
+      "Tank Refreshes (long-term maintenance): Drain, clean, and reset the entire system to restore balanced nutrient ratios.",
+      "Top-offs keep conditions steady week to week while refreshes restore balance month to month.",
+      "Together, they create the stable nutrient environment that drives healthy roots, strong growth, and better harvests."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    }
+   ]
+  },
+  "deep-clean": {
+   "title": "Deep clean",
+   "source": "https://help.mygardyn.com/en/articles/6166337",
+   "lede": [
+    "Keeping your Gardyn clean is essential for healthy plants and a thriving system. We'll walk you through a total cleanse step by step."
+   ],
+   "sections": [
+    {
+     "anchor": "a_note_on_cleaning_prevention",
+     "title": "A Note on Cleaning Prevention",
+     "body": [
+      "The Gardyn Home 4 columns have advanced seals that prevent nearly all internal growth. There are 5 other ways you can help prevent the need for a total-Gardyn clean:",
+      "Keep up with your regular root checks and root pruning",
+      "Regularly add HydroBoost with every tank top-off and refresh",
+      "Keep your tank full by topping off as soon as Kelby alerts you",
+      "Refresh the tank as soon as Kelby sends you a task",
+      "Keep any unused slots on your columns covered to prevent algae"
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "reasons_to_clean",
+     "title": "Reasons to Clean",
+     "body": [
+      "If you're dealing with algae, root pieces, salt deposits, or pests, or if you are planning to take a break from growing for a while, a whole Gardyn cleanse gives you and your plants a fresh start for better future growth."
+     ],
+     "list": false,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "watch_the_video",
+     "title": "Watch the Video",
+     "body": [
+      "The same steps are written below."
+     ],
+     "list": false,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "collect_your_materials",
+     "title": "Collect your materials",
+     "body": [
+      "You'll need: clean scissors, a tray, soft rags or paper towels, a small towel for the floor, about a cup of citric acid, a large bowl, a spray bottle, and a bottle brush.",
+      "The tools included in the Gardyn Harvest Kit, like the cleaning cloth and brush, are designed to fit and clean your Gardyn’s columns, yPods, and tight spaces.",
+      "⚠️ Safety Reminder:",
+      "When using citric acid to clean your Gardyn, always wear gloves to protect your skin. Citric acid is a natural but strong acid that can cause irritation with direct contact. Avoid contact with your eyes and skin, and wash your hands thoroughly after handling."
+     ],
+     "list": false,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "step_1_empty_your_gardyn_columns",
+     "title": "Step 1: Empty your Gardyn Columns",
+     "body": [
+      "Start by fully harvesting mature plants and removing any that are unhealthy, bolting, or have extensive algae or mold growing on the yCube. The more you remove, the easier this process will be!",
+      "If you want to keep any plants, place them on a tray. You can keep these yCube inside their yPods. It takes roots a few hours to dry out, so don't worry if water spills out of the yPods as you handle them.",
+      "If you have any covers like Gardyn Caps over unused slots, remove these now, too."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "step_2_clean_your_ypods_any_gardyn_caps",
+     "title": "Step 2: Clean your yPods & any Gardyn Caps",
+     "body": [
+      "Collect all the yPods from the plants you're not keeping along with any Gardyn Caps and place them in your bowl.",
+      "Using a ratio of two Tablespoons of citric acid per two cups of water, cover and soak these pieces for at least 15 minutes or overnight. ⚠️ Safety Reminder:",
+      "When using citric acid to clean your Gardyn, always wear gloves to protect your skin. Avoid contact with your eyes and skin, and wash your hands thoroughly after handling.",
+      "If you notice any stubborn algae or biofilm after soaking, use a bottle brush to scrub it off. The Gardyn Brush is sized to clean yPods and tight spaces without damaging the material. Rest assured that these pieces have still been cleaned, even if some stains remain."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "step_3_clean_your_columns",
+     "title": "Step 3: Clean your Columns",
+     "body": [
+      "Before you start this step, ensure your tank has at least 3 gallons of water in it for Gardyn Home, or 2 gallon for Gardyn Studio, by checking your tank level on your app’s home screen. Only add water up to this level if necessary. This will create the ideal water-to-citric acid ratio in your tank.",
+      "Begin by clearing out any large root pieces from the columns using long tweezers or something similar.",
+      "Mix 1 cup of citric acid for Gardyn Home, or 3/4 cup for Gardyn Studio, with 2 cups of water. Pour this directly into your water tank. ⚠️ Safety Reminder: When using citric acid to clean your Gardyn, always wear gloves to protect your skin. Avoid contact with your eyes and skin, and wash your hands thoroughly after handling.",
+      "Activate a watering cycle in the app to distribute the solution using the toggle in your water widget, found on your home screen.",
+      "While the cycle is running, fill your spray bottle using a ratio of two Tablespoons of citric acid per two cups of water.",
+      "Use this to spray the inside of your columns through every open slot.",
+      "Once the water cycle ends, scrub inside each slot with a bottle brush, then run another watering cycle to rinse everything down.",
+      "Wipe down the exterior of your columns, along with the exterior of the yPods, for any plants you kept with the remaining citric acid solution from your spray bottle or soak bowl. The Gardyn Cleaning Cloth is designed for these surfaces, with one side for general wiping and the other for lifting buildup."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "step_4_rinse_out_your_gardyn",
+     "title": "Step 4: Rinse out your Gardyn",
+     "body": [
+      "Now it's time to rinse out your Gardyn before placing any plants or new yCubes on it.",
+      "Turn off and unplug your Gardyn, raise the pump, open the lid locks, and lift by the columns to place your upper Gardyn on the towel.",
+      "Remove the tank and pour out the citric acid solution, then fill it with 3 gallons of fresh water. ⚠️ Safety Reminder: When using citric acid to clean your Gardyn, always wear gloves to protect your skin. Avoid contact with your eyes and skin, and wash your hands thoroughly after handling.",
+      "Return the upper half of your Gardyn to the tank. Lower the pump, plug your Gardyn in, and run one last watering cycle to flush your device.",
+      "Detach your tank one last time and wash it thoroughly with dish soap and water, ensuring you rinse it well."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "bonus_steps_otherwise_proceed_to_step_5",
+     "title": "BONUS Steps (otherwise, proceed to Step 5)",
+     "body": [
+      "If you've been dealing with a particularly dirty, unhealthy, or pest-affected Gardyn, we recommend adding these bonus steps into your routine for the most complete clean. You've already done the heavy lifting, so consider these add-ons your chance to put the whole in wholesome cleaning. If you have one, the Gardyn Cleaning Cloth is designed for this type of cleaning.",
+      "Bonus Step 1: Clean the lights",
+      "Use a damp rag to wipe down the metal light bar and plastic cover of your LED light bars. The soft microfiber side of the Gardyn cloth gently removes residue on these surfaces.",
+      "Bonus Step 2: Clean the lid's top and bottom",
+      "Tilt the upper half of your Gardyn so the metal sides of the light bars face the ceiling and the bulbs face the floor. This will give you access to the underside of the lid. Wipe the water level sensor with water only, then dry it. Wipe down the rest of the lid, including the funnels, irrigation hoses, and wood cap, with the same citric acid solution from your spray bottle or soak bowl. You can use the soft side of the Gardyn cloth for general wiping and the fish scale side for tougher stains or debris. Be sure to dry any wood immediately! ⚠️ Continue following the safety guidance above when using citric acid."
+     ],
+     "list": false,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "step_5_reattach_reboot_your_gardyn",
+     "title": "Step 5: Reattach & Reboot your Gardyn",
+     "body": [
+      "Reassemble all cleaned parts and plug your Gardyn back in. It may take about 5 minutes to reboot, and your schedules will resume automatically.",
+      "If you’re starting fresh with all new plants, fill your tank with 2 gallons (Gardyn Studio) or 3 gallons (Gardyn Home) of water only. Add your new yCubes, cover any open slots, and reset your SOW Date in the app.",
+      "If you're returning existing plants to your columns, dissolve ½ teaspoon of plant food per gallon while refilling. Don't forget to cover any empty slots with Gardyn Caps to keep those columns clean! Log your cleaning as a tank refresh in the app."
+     ],
+     "list": true,
+     "about_vendor_app": false
+    },
+    {
+     "anchor": "amazing_job_youre_all_done_cleaning",
+     "title": "Amazing job, you're all done cleaning!",
+     "body": [
+      "Your Gardyn is now fresh, clean, and ready to grow. Your plants will reward you with many delicious harvests to come, thanks to your diligent effort!"
+     ],
+     "list": false,
+     "about_vendor_app": false
+    }
+   ]
+  }
+ }
+}
