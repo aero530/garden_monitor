@@ -20,7 +20,13 @@ fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(dirname "$HERE")"
-UID_GID="1000:1000"
+# The uid the containers run as. Kept as two values as well as one string because
+# `install` wants them separately (`-o` is a user, not a user:group) while `chown`
+# wants them joined — passing the combined form to `install` fails with the
+# unhelpful "invalid user '1000:1000'".
+RUN_UID=1000
+RUN_GID=1000
+UID_GID="$RUN_UID:$RUN_GID"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
@@ -38,9 +44,9 @@ esac
 echo "podman $version"
 
 say "Creating directories"
-install -d -o "$UID_GID" -m 0750 /var/lib/garden /var/lib/garden/db \
+install -d -o "$RUN_UID" -g "$RUN_GID" -m 0750 /var/lib/garden /var/lib/garden/db \
   /var/lib/garden/frames /var/lib/garden/backups
-install -d -o "$UID_GID" -m 0750 /var/lib/garden-ntfy /var/cache/garden-ntfy
+install -d -o "$RUN_UID" -g "$RUN_GID" -m 0750 /var/lib/garden-ntfy /var/cache/garden-ntfy
 # Caddy's certificates and its ACME account key. Losing this directory means
 # re-issuing on every restart, which Let's Encrypt rate-limits hard.
 install -d -m 0750 /var/lib/garden-caddy /var/log/garden-caddy

@@ -78,6 +78,39 @@ garden is tens of megabytes. The disk is sized for photographs.
 
 ## Part 1 — the Proxmox VM
 
+### 1.0 Four things to check first
+
+`qm create` fails on any of these, and the error names the flag rather than the reason.
+Thirty seconds now:
+
+```sh
+qm list | awk '$1==200'          # empty, or pick a different VM id
+pvesm status                     # is your storage called local-lvm?
+ip -br link show type bridge     # is your bridge called vmbr0?
+ls /var/lib/vz/template/iso/     # the ISO, once you have downloaded it
+```
+
+**Storage** is the one that catches people, and there are *two* of them. `local-lvm` is
+the default for VM disks on an LVM-thin install; a ZFS install calls it `local-zfs`, and
+plenty of people name theirs something else entirely. ISOs usually live somewhere else
+again — `local`, a directory store — because block storage cannot hold a file.
+
+```sh
+pvesm status --content images    # where the VM disk goes
+pvesm status --content iso       # where the installer goes
+```
+
+Substitute both below. The disk store appears twice in the create command and the ISO
+store once.
+
+**Check the disk store supports snapshots** before you rely on step 1.6. LVM-thin, ZFS
+and directory-with-qcow2 all do. Plain LVM does not, and you will find out at the moment
+you wanted a rollback point.
+
+`--cpu host` passes the physical CPU through, which roughly halves Rust build times
+inside the VM. It also prevents live migration to a host with a different CPU. On a
+single-node Proxmox that costs nothing; on a cluster, use `x86-64-v3` instead.
+
 ### 1.1 Get the ISO onto Proxmox
 
 Fastest route is to have Proxmox download it directly. On the Proxmox host:
@@ -159,11 +192,23 @@ qm set 200 --ide2 none,media=cdrom
 
 ### 1.4 First boot
 
-From your workstation:
+**In the Proxmox console**, because SSH may not be running yet and the address is about
+to change. "Fedora Custom Operating System" is minimal enough that `openssh-server` is
+not guaranteed:
 
 ```sh
-ssh-copy-id you@garden-brain.local        # or the IP from the console
-ssh you@garden-brain.local
+ip -br a                                  # note the current address
+sudo dnf install -y openssh-server
+sudo systemctl enable --now sshd
+sudo firewall-cmd --permanent --add-service=ssh && sudo firewall-cmd --reload
+systemctl is-active sshd                  # active
+```
+
+Now from your workstation:
+
+```sh
+ssh-copy-id you@<the address from ip -br a>
+ssh you@<that address>
 ```
 
 Then, on the VM:
