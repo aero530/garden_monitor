@@ -30,7 +30,7 @@ flowchart LR
       ollama["ollama<br/><small>optional · VisualDiagnosis</small>"]
     end
     disk[("/var/lib/garden<br/><small>SQLite + frames</small>")]
-    ts["tailscaled<br/><small>on the host</small>"]
+    caddy["caddy<br/><small>TLS · fronts ntfy only</small>"]
   end
 
   phone["Your phone<br/><small>ntfy app + browser</small>"]
@@ -40,9 +40,9 @@ flowchart LR
   web --> disk
   web -->|"publish"| ntfy
   web -.->|"if enabled"| ollama
-  web --- ts
-  ntfy --- ts
-  ts ==>|"Tailscale"| phone
+  ntfy --- caddy
+  caddy ==>|"push, from anywhere"| phone
+  phone -.->|"ack buttons<br/><small>LAN only</small>"| web
 
   classDef opt stroke-dasharray: 4 3
   class ollama opt
@@ -57,8 +57,10 @@ Four things worth noticing before you start:
 - **The brain is not in the control loop.** If this whole VM dies, the Gardyn keeps
   running on the schedule already resident on the Pi. That is a deliberate design
   constraint, and it means a botched deployment costs you notifications, not plants.
-- **Tailscale runs on the host, not in a container.** It is what makes the Done and
-  Snooze buttons work when you are not at home.
+- **Only Caddy faces the internet, and it fronts only ntfy.** Notifications reach you
+  anywhere; the brain stays on the LAN, so the Done and Snooze buttons resolve at home
+  and not away from it. The asymmetry is deliberate — ntfy holds topic names, the brain
+  holds everything else. See DESIGN.md §10.
 
 ### Sizing
 
@@ -408,13 +410,13 @@ sudo install -m 0644 deploy/quadlet/garden-ntfy.container /etc/containers/system
 **Edit `/etc/garden/ntfy-server.yml` before starting it.** One line matters:
 
 ```yaml
-base-url: "https://ntfy.your-tailnet.ts.net"
+base-url: "https://ntfy.example.com"
 ```
 
 That is how your **phone** reaches ntfy, not how the brain does. ntfy stamps it into
 the action buttons on every notification. Get it wrong and push arrives perfectly while
-every Done button does nothing. If you have not set up Tailscale yet (Part 7), put the
-LAN address in for now — `http://192.168.1.20:8090` — and come back and change it.
+every Done button does nothing. It is the public name Caddy holds a certificate for
+(Part 7), so it has to resolve from mobile data rather than only from the house.
 
 ```sh
 sudo systemctl daemon-reload
@@ -475,7 +477,7 @@ You are looking for:
 ```
 INFO garden_web: camera frames stored under /var/lib/garden/frames
 INFO garden_web: no accounts yet — the first to register becomes administrator
-INFO garden_web: listening on 0.0.0.0:8080 (base url https://garden.your-tailnet.ts.net)
+INFO garden_web: listening on 0.0.0.0:8080 (base url http://192.168.1.20:8080)
 ```
 
 A `no notification channel configured` warning here means `GARDEN_NTFY_URL` is unset or
@@ -521,68 +523,144 @@ enforced by a test asserting no rule reads the field, not by discipline.
 
 ---
 
-## Part 7 — Tailscale
+## Part 7 — Caddy, so notifications arrive when you are out
 
-Not optional, in practice. The Done and Snooze buttons in a notification are links back
-to the brain. On your home wifi they resolve. Anywhere else they do not — and tapping
-Done while you are out is precisely when you want it to work.
+**ntfy goes on the internet. The brain does not.** ntfy is one upstream server holding
+topic names and an auth database; the brain holds every reading, frame and account you
+have, including photographs of the inside of your home. Exposing the first buys timely
+notifications anywhere. Exposing the second buys a working button — a much worse trade,
+and DESIGN.md §10 has the full reasoning.
 
-Tailscale also gives you real HTTPS certificates, which is what lets you drop
-`GARDEN_INSECURE_COOKIES`.
+You need a DNS name pointing at your home address (dynamic DNS is fine — only the phone
+resolves it) and **port 443 forwarded at the router, and nothing else**.
+
+### If your address is dynamic
+
+`deploy/garden-ddns` keeps a DreamHost A record pointing here. Worth having even if your
+IP looks stable: when it does move, nothing on this end fails — the brain keeps
+publishing, ntfy keeps accepting, and the notifications simply stop arriving.
 
 ```sh
-sudo dnf install -y tailscale
-sudo systemctl enable --now tailscaled
-sudo tailscale up --advertise-tags=tag:garden
+sudo install -m0755 deploy/garden-ddns /usr/local/bin/garden-ddns
+sudo install -m0644 deploy/systemd/garden-ddns.{service,timer} /etc/systemd/system/
+sudo tee /etc/garden/ddns.env >/dev/null <<'EOF'
+DREAMHOST_KEY=your-api-key
+DDNS_RECORD=ntfy.yourdomain.com
+EOF
+sudo chmod 600 /etc/garden/ddns.env
+
+sudo /usr/local/bin/garden-ddns          # run it once by hand first
+sudo systemctl enable --now garden-ddns.timer
 ```
 
-Then publish the two services onto the tailnet:
+Generate the key in the DreamHost panel with **only the `dns-*` permissions**. A key
+that can also touch billing is not one to leave in a cron job.
+
+Run it by hand before trusting the timer. DreamHost has no update command, so the script
+removes and re-adds — there is a brief window with no record, and a failure halfway
+leaves the name pointing nowhere. It checks the result rather than assuming, but you
+want to see that work once.
 
 ```sh
-sudo tailscale serve --bg --https=443  http://localhost:8080    # the brain
-sudo tailscale serve --bg --https=8443 http://localhost:8090    # ntfy
-sudo tailscale serve status
+sudo mkdir -p /var/lib/garden-caddy /var/log/garden-caddy
+sudo install -m644 deploy/Caddyfile /etc/garden/Caddyfile
+sudo $EDITOR /etc/garden/Caddyfile          # hostname and email
+sudo install -m644 deploy/quadlet/garden-caddy.container /etc/containers/systemd/
+sudo systemctl daemon-reload
+sudo systemctl start garden-caddy
+journalctl -u garden-caddy | grep -i certificate
 ```
 
-Install Tailscale on your phone, sign in to the same tailnet, and update both configs
-with the real names:
+Caddy obtains and renews the certificate itself — no certbot, no cron job to forget in
+ninety days. Port 80 needs to be reachable during issue for the ACME challenge; after
+that only 443 matters.
+
+Then point ntfy's `base-url` at the public name and restart it:
 
 ```sh
-# /etc/garden/web.env
-GARDEN_BASE_URL=https://garden-brain.your-tailnet.ts.net
-# and remove GARDEN_INSECURE_COOKIES if you had set it
-
 # /etc/garden/ntfy-server.yml
-base-url: "https://garden-brain.your-tailnet.ts.net:8443"
+base-url: "https://ntfy.example.com"
 
-sudo systemctl restart garden-ntfy garden-web
+sudo systemctl restart garden-ntfy
 ```
 
-**Do not port-forward 8080 from your router instead.** This system holds photographs of
-the inside of your home.
+`GARDEN_BASE_URL` stays a **LAN** address, and `GARDEN_INSECURE_COOKIES` stays set. The
+brain is plain HTTP on the LAN, and a `__Host-` cookie over plain HTTP fails in a way
+that looks like a wrong password rather than a misconfiguration.
 
 ### Firewall
 
-Tailscale traffic arrives on its own interface and is not affected by these rules; they
-govern LAN access.
-
 ```sh
+# Public: Caddy only.
+sudo firewall-cmd --permanent --zone=public --add-service=https
+sudo firewall-cmd --permanent --zone=public --add-service=http   # ACME challenge
+# Internal: the brain, for the Pi and your browser.
 sudo firewall-cmd --permanent --zone=internal --add-port=8080/tcp
-sudo firewall-cmd --permanent --zone=internal --add-port=8090/tcp
 sudo firewall-cmd --permanent --zone=internal --add-source=192.168.1.0/24
 sudo firewall-cmd --reload
-sudo firewall-cmd --list-all --zone=internal
+sudo firewall-cmd --list-all --zone=public
 ```
 
-The Pi needs to reach 8080 over the LAN, so leave that one open even after Tailscale is
-working.
+**8090 needs no rule.** ntfy is not published to the host at all — Caddy reaches it by
+container name over the shared Podman network. If you catch yourself opening 8090, or
+forwarding 8080 at the router, stop: that is the arrangement this part exists to avoid.
+
+---
+
+## Part 7b — bringing an existing database with you
+
+Skip this on a fresh install. Do it if you have been running the brain on a workstation
+and want to keep the accounts, gardens, telemetry and camera frames you already have —
+which you probably do, because **frames are not spooled**. Telemetry the Pi could not
+deliver is replayed from its spool; an hourly photograph missed while the brain was down
+is gone, and those frames are what the growth curves are eventually fitted from.
+
+**Do not copy `garden.db` on its own.** In WAL mode the recent writes live in
+`garden.db-wal`, which can be larger than the database itself. Copying just the one file
+silently loses everything since the last checkpoint. `garden-cli backup` does
+`VACUUM INTO`, which writes a single coherent file:
+
+```sh
+# On the workstation, with the brain STOPPED.
+cargo run --release -p garden-cli -- --database sqlite://garden.db backup --out garden-migrate.db
+```
+
+Then move both halves of the state — the database and the frame files:
+
+```sh
+scp garden-migrate.db you@garden-brain.local:/tmp/
+rsync -av garden-data/frames/ you@garden-brain.local:/tmp/frames/
+```
+
+On the VM, with `garden-web` **not yet started**:
+
+```sh
+sudo install -o 1000 -g 1000 -m 0640 /tmp/garden-migrate.db /var/lib/garden/db/garden.db
+sudo rsync -a /tmp/frames/ /var/lib/garden/frames/
+sudo chown -R 1000:1000 /var/lib/garden/frames
+sudo systemctl start garden-web
+```
+
+Then check it arrived rather than assuming:
+
+```sh
+sudo podman exec -it systemd-garden-web garden-cli gardens
+ls /var/lib/garden/frames/*/ | wc -l
+```
+
+You should see your garden id and your frame count. **The garden id must not change** —
+the Pi has it baked into `/etc/garden/edge.env`, and a new one means telemetry arriving
+for a garden that does not exist.
+
+Registration will be closed on the migrated database, because it already has an owner.
+Sign in with the account you created on the workstation; if that password has become
+vague, change it afterwards at **Account → Change password**.
 
 ---
 
 ## Part 8 — first run
 
-Open `https://garden-brain.your-tailnet.ts.net` (or `http://192.168.1.20:8080` on the
-LAN).
+Open `http://192.168.1.20:8080` from a machine on the LAN.
 
 1. **Register.** The first account becomes the server administrator. Registration then
    closes; everyone after joins by invitation.
@@ -593,8 +671,8 @@ LAN).
    (`garden-phil-8f3a2c`, not `garden`; anyone who knows a topic can publish to it) and
    set your **UTC offset**, or quiet hours will be computed in UTC and stay silent at
    the wrong times.
-5. **Subscribe on the phone.** ntfy app → Settings → Default server → your Tailscale
-   ntfy URL → sign in as `phone` → subscribe to that topic.
+5. **Subscribe on the phone.** ntfy app → Settings → Default server →
+   `https://ntfy.example.com` → sign in as `phone` → subscribe to that topic.
 
 Test the whole chain:
 
@@ -612,8 +690,8 @@ Then point the Pi at it — [HARDWARE.md §1.2](HARDWARE.md) — using the same
 
 ### Snapshot again
 
-```sh
-qm snapshot 200 working --description "brain + ntfy running, tailscale up"
+qm snapshot 200 working --description "brain + ntfy + caddy running"
+qm snapshot 200 working --description "brain + ntfy + caddy running"
 ```
 
 ---
@@ -708,7 +786,7 @@ Snapshot before a major release upgrade. `--onboot 1` brings everything back by 
 | `garden-ntfy` | `systemd-garden-ntfy` | 8090 | push |
 | `garden-ollama` | `systemd-garden-ollama` | — | optional, network-internal only |
 | `garden-backup.timer` | — | — | nightly 03:30 |
-| `tailscaled` | — | — | remote access |
+| `garden-caddy` | `systemd-garden-caddy` | 443, 80 | the only internet-facing service |
 
 ### Commands you will actually use
 
@@ -753,8 +831,9 @@ not `chmod 777`.
 `podman run` still lurking. `sudo podman ps -a` and remove the stray one.
 
 **Web UI loads but sign-in bounces back to the login page.** Session cookies use the
-`__Host-` prefix, which browsers refuse over plain HTTP. Use the Tailscale HTTPS name,
-or set `GARDEN_INSECURE_COOKIES=1` as a temporary measure.
+`__Host-` prefix, which browsers refuse over plain HTTP. The brain is deliberately plain
+HTTP on the LAN, so `GARDEN_INSECURE_COOKIES=1` is the expected setting here rather than
+a workaround.
 
 **Push works from `curl` but not from the brain.** The brain cannot reach ntfy:
 
@@ -765,9 +844,11 @@ sudo podman exec -it systemd-garden-web sh -c 'wget -qO- http://garden-ntfy:8090
 If that fails, the two containers are not on the same network. Check both `.container`
 files have `Network=garden.network`.
 
-**Notifications arrive; the buttons do nothing.** `GARDEN_BASE_URL` is a name your phone
-cannot resolve. It must be the Tailscale name, not `localhost` and not a LAN IP you are
-not currently on.
+**Notifications arrive; the buttons do nothing.** If you are at home, `GARDEN_BASE_URL`
+is `localhost` rather than the LAN address — it is stamped into the links at send time,
+so it must be a name the *phone* resolves. If you are out, this is the design working as
+chosen: the brain is not exposed (DESIGN.md §10), and doing the work will complete the
+task when the sensor moves.
 
 **The Pi gets 401.** `GARDEN_AGENT_TOKEN` differs between `/etc/garden/web.env` and the
 Pi's `/etc/garden/edge.env`.
@@ -804,5 +885,5 @@ Stated plainly so you do not go looking:
   garden keeps running on the Pi's resident schedule.
 - **No metrics stack.** Grafana and VictoriaMetrics would be a reasonable addition; the
   built-in dashboard covers the operational view and nothing scrapes Prometheus.
-- **No automated TLS beyond Tailscale.** No Caddy, no Let's Encrypt, because nothing
-  here should be on the public internet.
+- **TLS covers ntfy only.** Caddy holds one certificate for the push endpoint; the brain
+  has none, because it is not on the public internet and is not meant to be.

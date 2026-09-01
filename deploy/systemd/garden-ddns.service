@@ -1,0 +1,19 @@
+[Unit]
+Description=Keep the DreamHost A record pointing at this house
+Documentation=https://help.dreamhost.com/hc/en-us/articles/217560167-API_overview
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/garden-ddns
+# Holds the API key.
+EnvironmentFile=-/etc/garden/ddns.env
+
+# It talks to two web services and edits one DNS record. Nothing else.
+DynamicUser=false
+User=root
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true

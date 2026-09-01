@@ -1,0 +1,13 @@
+[Unit]
+Description=Check the public IP every fifteen minutes
+
+[Timer]
+# Frequent enough that an address change costs you one missed notification window
+# rather than a day of them, and light enough that nobody's API minds.
+OnBootSec=2min
+OnUnitActiveSec=15min
+# Without this every VM on the internet checks at :00.
+RandomizedDelaySec=90
+
+[Install]
+WantedBy=timers.target

@@ -24,11 +24,27 @@ impl TankGeometry {
     /// procedure is a gallon at a time up to that figure — so 4 × 3.785 L is both the
     /// published capacity and the volume a refresh actually puts in.
     ///
-    /// Calibration distances are placeholders until Phase 0 measures the real ones.
+    /// Distances are the factory's own operating band — `WL_DATAPOINTS_CLAMP_MIN` and
+    /// `MAX` in its `config.py`, 3 cm to 25 cm — now that Phase 0 has established the
+    /// reading is a distance from the sensor down to the water.
+    ///
+    /// They replace placeholders of 60 mm and 330 mm that were wrong in a way that
+    /// mattered: the sensor never legitimately reads past 250 mm, so an empty tank
+    /// computed as 30% full. That is roughly 4.5 litres that do not exist, and the
+    /// consequence is not a wrong number on a dashboard — it is the "tank is dry in N
+    /// hours" escalation firing late, or never.
+    ///
+    /// The span checks out physically: 15.14 L over 220 mm needs a 688 cm² cross
+    /// section, which is 0.74 sq ft, about half the Studio 2's 1.4 sq ft footprint —
+    /// right for a tank with the columns standing above it.
+    ///
+    /// **Still inferred rather than measured.** `garden-cli tank calibrate` fits these
+    /// from a jug and a few readings and needs no database. Do that before trusting a
+    /// volume to the litre; the shape of the tank is not guaranteed to be a prism.
     pub const STUDIO_2: TankGeometry = TankGeometry {
         capacity_l: 15.14,
-        full_distance_mm: 60.0,
-        empty_distance_mm: 330.0,
+        full_distance_mm: 30.0,
+        empty_distance_mm: 250.0,
     };
 
     /// Convert a distance reading to litres, clamped to the physical range.

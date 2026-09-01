@@ -41,11 +41,15 @@ say "Creating directories"
 install -d -o "$UID_GID" -m 0750 /var/lib/garden /var/lib/garden/db \
   /var/lib/garden/frames /var/lib/garden/backups
 install -d -o "$UID_GID" -m 0750 /var/lib/garden-ntfy /var/cache/garden-ntfy
+# Caddy's certificates and its ACME account key. Losing this directory means
+# re-issuing on every restart, which Let's Encrypt rate-limits hard.
+install -d -m 0750 /var/lib/garden-caddy /var/log/garden-caddy
 install -d -m 0750 /etc/garden
 
 say "Installing configuration templates"
 for pair in "web.env.example:/etc/garden/web.env" \
-            "ntfy-server.yml:/etc/garden/ntfy-server.yml"; do
+            "ntfy-server.yml:/etc/garden/ntfy-server.yml" \
+            "Caddyfile:/etc/garden/Caddyfile"; do
   src="${pair%%:*}"; dst="${pair##*:}"
   if [ -e "$dst" ]; then
     echo "keeping existing $dst"
@@ -59,7 +63,8 @@ chown "$UID_GID" /etc/garden/ntfy-server.yml
 
 say "Installing Quadlet units"
 install -d -m 0755 /etc/containers/systemd
-for unit in garden.network garden-web.container garden-ntfy.container; do
+for unit in garden.network garden-web.container garden-ntfy.container \
+            garden-caddy.container; do
   install -m 0644 "$HERE/quadlet/$unit" "/etc/containers/systemd/$unit"
   echo "  $unit"
 done
@@ -78,29 +83,36 @@ say "Reloading systemd"
 # files above into real .service units. Without it, nothing exists to start.
 systemctl daemon-reload
 
-say "Opening the firewall on the internal zone"
+say "Opening the firewall"
+# The brain is LAN-only; Caddy holds the only internet-facing port and fronts only
+# ntfy. 8090 is deliberately absent — ntfy is not published to the host at all, and
+# Caddy reaches it by container name. See DESIGN.md §10.
 if systemctl is-active --quiet firewalld; then
   firewall-cmd --permanent --zone=internal --add-port=8080/tcp >/dev/null
-  firewall-cmd --permanent --zone=internal --add-port=8090/tcp >/dev/null
+  firewall-cmd --permanent --zone=public --add-service=https >/dev/null
+  # HTTP is needed only while Let's Encrypt answers its challenge; Caddy redirects
+  # everything else to HTTPS.
+  firewall-cmd --permanent --zone=public --add-service=http >/dev/null
   firewall-cmd --reload >/dev/null
-  echo "8080 and 8090 open on the internal zone"
+  echo "8080 internal (the brain); 443 and 80 public (Caddy only)"
 else
   echo "firewalld is not running — skipped"
 fi
 
 cat <<'DONE'
 
-==> Installed. Two things left, both of which need your input:
+==> Installed. Three things left, all of which need your input:
 
-  1. Edit /etc/garden/ntfy-server.yml  — set base-url to how your PHONE will
-     reach ntfy, then:
+  1. Edit /etc/garden/ntfy-server.yml — set base-url to the PUBLIC name your
+     phone will use (the one Caddy holds a certificate for), then:
 
        sudo systemctl enable --now garden-ntfy
        sudo podman exec -it systemd-garden-ntfy ntfy user add --role=admin garden
        sudo podman exec -it systemd-garden-ntfy ntfy token add garden
 
-  2. Edit /etc/garden/web.env — set GARDEN_BASE_URL, paste the ntfy token into
-     GARDEN_NTFY_TOKEN, and generate an agent token:
+  2. Edit /etc/garden/web.env — set GARDEN_BASE_URL to the brain's LAN address
+     (it stays on the LAN by design; see DESIGN.md §10), paste the ntfy token
+     into GARDEN_NTFY_TOKEN, and generate an agent token:
 
        openssl rand -hex 32
 
@@ -109,7 +121,17 @@ cat <<'DONE'
        sudo systemctl enable --now garden-web
        sudo systemctl enable --now garden-backup.timer
 
+  3. Edit /etc/garden/Caddyfile — hostname and email — then, once your DNS name
+     resolves to this house and the router forwards 443:
+
+       sudo systemctl enable --now garden-caddy
+       journalctl -u garden-caddy | grep -i certificate
+
+     Leave this until last. Caddy cannot obtain a certificate before the name
+     resolves, and Let's Encrypt rate-limits repeated failures.
+
   Watch it come up with:  journalctl -u garden-web -f
-  The first account to register at the web UI becomes the administrator.
+  The first account to register at the web UI becomes the administrator —
+  unless you migrated an existing database, which brings its accounts with it.
 
 DONE

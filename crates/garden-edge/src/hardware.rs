@@ -11,7 +11,7 @@
 //! would be an excellent way to cook a tray of seedlings.
 
 use garden_core::{SensorSnapshot, Timestamp};
-use garden_proto::recon::{CameraDevice, I2cDevice, ReconReport, expected};
+use garden_proto::recon::{CameraDevice, GpioPin, I2cDevice, ReconReport, expected};
 use std::path::Path;
 use std::process::Command;
 
@@ -41,12 +41,60 @@ pub enum HardwareError {
 
 pub type Result<T> = std::result::Result<T, HardwareError>;
 
+/// Decode the AHT20's six-byte measurement into `(°C, %RH)`.
+///
+/// Two 20-bit values sharing the middle byte: humidity in the high nibble of byte 3,
+/// temperature in the low. Both are fractions of 2²⁰ — humidity over 100, temperature
+/// over 200 with a 50 °C offset — which is what distinguishes this part from the AM2320
+/// the peripheral map claimed, whose readings come in tenths of a degree.
+///
+/// Pure, so the arithmetic is checked on a desktop against the factory's own reported
+/// values rather than against a datasheet reading of it.
+/// Only the ARM backend has an I²C bus to call this with, so off-target its only
+/// caller is its own test suite — which is the point of splitting it out.
+#[cfg_attr(
+    not(all(target_os = "linux", any(target_arch = "arm", target_arch = "aarch64"))),
+    allow(dead_code)
+)]
+fn aht20_convert(buffer: &[u8; 6]) -> Option<(f32, f32)> {
+    /// Bit 7 of the status byte. Set means the conversion is still running and the rest
+    /// of the buffer is the *previous* measurement — stale rather than wrong, but this
+    /// part is shared with the factory's own reader, so a busy flag is worth honouring.
+    const BUSY: u8 = 0x80;
+    /// 2²⁰. Both fields are twenty bits.
+    const FULL_SCALE: f32 = 1_048_576.0;
+
+    if buffer[0] & BUSY != 0 {
+        return None;
+    }
+
+    let humidity_raw =
+        (u32::from(buffer[1]) << 12) | (u32::from(buffer[2]) << 4) | (u32::from(buffer[3]) >> 4);
+    let temp_raw =
+        ((u32::from(buffer[3]) & 0x0F) << 16) | (u32::from(buffer[4]) << 8) | u32::from(buffer[5]);
+
+    let humidity = humidity_raw as f32 / FULL_SCALE * 100.0;
+    let temp = temp_raw as f32 / FULL_SCALE * 200.0 - 50.0;
+
+    // An uncalibrated or absent part reads as all zeros or all ones, which converts to
+    // -50 °C at 0% or 150 °C at 100%. Neither is a room, and either would be worse than
+    // no reading: the capability model handles absence, but a rule cannot tell that a
+    // plausible-looking number is fiction.
+    if !(-40.0..=85.0).contains(&temp) || !(0.0..=100.0).contains(&humidity) {
+        return None;
+    }
+    Some((temp, humidity))
+}
+
 fn read_trimmed(path: &str) -> Option<String> {
     std::fs::read_to_string(path)
         .ok()
         // Device-tree strings are NUL-terminated; trimming whitespace alone leaves the
         // NUL in place and it renders as a stray glyph in the report.
-        .map(|s| s.trim_matches(|c: char| c.is_whitespace() || c == '\0').to_string())
+        .map(|s| {
+            s.trim_matches(|c: char| c.is_whitespace() || c == '\0')
+                .to_string()
+        })
         .filter(|s| !s.is_empty())
 }
 
@@ -73,11 +121,13 @@ pub fn probe(agent_version: &str, now: Timestamp) -> ReconReport {
     report.board_model = read_trimmed("/proc/device-tree/model");
     report.cpu_architecture = Some(std::env::consts::ARCH.to_string());
     report.kernel = command_output("uname", &["-r"]).map(|s| s.trim().to_string());
-    report.os = std::fs::read_to_string("/etc/os-release").ok().and_then(|s| {
-        s.lines()
-            .find_map(|l| l.strip_prefix("PRETTY_NAME="))
-            .map(|v| v.trim_matches('"').to_string())
-    });
+    report.os = std::fs::read_to_string("/etc/os-release")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find_map(|l| l.strip_prefix("PRETTY_NAME="))
+                .map(|v| v.trim_matches('"').to_string())
+        });
 
     probe_i2c(&mut report);
     probe_cameras(&mut report);
@@ -152,7 +202,8 @@ fn probe_one_wire(report: &mut ReconReport) {
     let Ok(entries) = std::fs::read_dir("/sys/bus/w1/devices") else {
         report.warnings.push(
             "1-Wire bus not present; a DS18B20 water probe needs `dtoverlay=w1-gpio` in \
-             /boot/firmware/config.txt"
+             the boot config — /boot/config.txt on this Pi's Raspbian 9, \
+             /boot/firmware/config.txt on Bookworm and later"
                 .into(),
         );
         return;
@@ -176,19 +227,55 @@ fn probe_pwm(report: &mut ReconReport) {
     // The factory firmware is expected to drive PWM through pigpio, which is also how
     // `watch-pwm` reads its duty cycle back without a logic analyser.
     report.pigpiod_running = command_output("pgrep", &["-x", "pigpiod"]).is_some();
-    if !report.pigpiod_running {
-        report.warnings.push(
+    // Running is not the same as reachable, and on this device the two disagree:
+    // Raspbian's stock unit is `pigpiod -l`, which shuts the socket `pigs` speaks and
+    // leaves only the FIFOs. Only reachability predicts whether parity capture will
+    // record anything, so ask the daemon rather than the process table.
+    report.pigpiod_interface = crate::pwm_watch::pigpio_interface().map(str::to_string);
+
+    // The whole header, not just the four documented pins: the spare ones are where a
+    // DS18B20 or a parity jumper goes, and knowing which are spare needs the same scan.
+    report.gpio_modes = crate::pwm_watch::pin_modes(0..=27)
+        .into_iter()
+        .map(|(gpio, mode)| GpioPin {
+            gpio,
+            mode: mode.to_string(),
+            role: expected::PIN_ROLES
+                .iter()
+                .find(|(pin, _, _)| *pin == gpio)
+                .map(|(_, role, _)| (*role).to_string()),
+        })
+        .collect();
+    for conflict in report.pin_role_conflicts() {
+        report.warnings.push(conflict);
+    }
+
+    match (report.pigpiod_running, report.pigpiod_interface.is_some()) {
+        (_, true) => {}
+        (true, false) => report.warnings.push(
+            "pigpiod is running but answers on neither its socket nor its FIFOs. \
+             Parity capture would log `unavailable` for weeks. Check that /dev/pigpio \
+             and /dev/pigout exist before starting Phase 1"
+                .into(),
+        ),
+        (false, false) => report.warnings.push(
             "pigpiod is not running; parity capture will need /sys/class/pwm or a \
              jumper to a spare GPIO"
                 .into(),
-        );
+        ),
     }
 }
 
 fn probe_services(report: &mut ReconReport) {
     let Some(output) = command_output(
         "systemctl",
-        &["list-units", "--type=service", "--state=running", "--no-legend", "--plain"],
+        &[
+            "list-units",
+            "--type=service",
+            "--state=running",
+            "--no-legend",
+            "--plain",
+        ],
     ) else {
         report
             .warnings
@@ -203,10 +290,23 @@ fn probe_services(report: &mut ReconReport) {
         let lower = unit.to_lowercase();
         // Anything that looks like it belongs to the vendor. Worth knowing before
         // Phase 6 disables it.
-        if ["garden", "azure", "iot", "kelby", "garden"]
-            .iter()
-            .any(|needle| lower.contains(needle))
-        {
+        //
+        // The first two needles are the ones that matter: Phase 0 on the real unit
+        // found the sensor and water-level daemons named `gy_events` and `gy_wl`, and
+        // the connection-string and pairing helpers with no vendor mark on them at
+        // all. A guess at "garden" or "gardyn" would have listed none of them, which
+        // reads as a clean device rather than a missed one.
+        const VENDOR: &[&str] = &[
+            "gy_",             // gy_events, gy_wl, gy_iot
+            "iot",             // gy_iot, iot-controller
+            "conn-string",     // Azure connection string provisioning
+            "wifi-pairing",    // vendor onboarding
+            "network-checker", // vendor connectivity watchdog
+            "azure",
+            "kelby",
+            "garden",
+        ];
+        if VENDOR.iter().any(|needle| lower.contains(needle)) {
             report.vendor_services.push(unit.to_string());
         }
     }
@@ -242,7 +342,7 @@ mod imp {
     /// "no reading" as "not available".
     pub fn read_sensors(now: Timestamp) -> SensorSnapshot {
         let mut snapshot = SensorSnapshot::empty(now);
-        if let Ok((temp, humidity)) = am2320() {
+        if let Ok((temp, humidity)) = aht20() {
             snapshot.air_temp_c = Some(temp);
             snapshot.humidity_pct = Some(humidity);
         }
@@ -259,32 +359,33 @@ mod imp {
         Ok(bus)
     }
 
-    /// AM2320 air temperature and humidity.
+    /// AHT20 air temperature and humidity.
     ///
-    /// The part sleeps between reads and NAKs the wake-up, so the first write is
-    /// expected to fail and must be ignored rather than retried as an error.
-    fn am2320() -> Result<(f32, f32)> {
-        let mut bus = open(expected::AM2320)?;
-        let _ = bus.write(&[]);
-        std::thread::sleep(std::time::Duration::from_millis(2));
+    /// This was an AM2320 driver until 2026-08-31, when it returned nothing on the real
+    /// device while the factory happily reported 25.3387451171875 °C and
+    /// 54.88100051879883 %. Those are not AM2320 numbers — that part reports tenths of a
+    /// degree in 16 bits, and would have said 25.3. They are exactly 394992 and 575469
+    /// over 2²⁰, which is the AHT conversion. `0x38` is the AHT family's address; an
+    /// AM2320 lives at `0x5C`. See `super::aht20_convert` for the arithmetic, which is
+    /// tested against those two readings.
+    ///
+    /// No calibration command is sent. The factory's `gy_events` is reading this part
+    /// several times a minute, so it is demonstrably already initialised, and issuing
+    /// `0xBE` mid-conversation would be a write to a device we do not own yet.
+    fn aht20() -> Result<(f32, f32)> {
+        let mut bus = open(expected::AHT20)?;
 
-        bus.write(&[0x03, 0x00, 0x04])
-            .map_err(|e| HardwareError::Bus(format!("AM2320 request: {e}")))?;
-        std::thread::sleep(std::time::Duration::from_millis(2));
+        bus.write(&[0xAC, 0x33, 0x00])
+            .map_err(|e| HardwareError::Bus(format!("AHT20 trigger: {e}")))?;
+        // The datasheet asks for 75 ms; the extra is cheap once a minute.
+        std::thread::sleep(std::time::Duration::from_millis(85));
 
-        let mut buffer = [0u8; 8];
+        let mut buffer = [0u8; 6];
         bus.read(&mut buffer)
-            .map_err(|e| HardwareError::Bus(format!("AM2320 read: {e}")))?;
+            .map_err(|e| HardwareError::Bus(format!("AHT20 read: {e}")))?;
 
-        let humidity = f32::from(u16::from_be_bytes([buffer[2], buffer[3]])) / 10.0;
-        let raw = u16::from_be_bytes([buffer[4], buffer[5]]);
-        // Bit 15 is the sign; the remaining bits are tenths of a degree.
-        let temp = if raw & 0x8000 != 0 {
-            -(f32::from(raw & 0x7FFF) / 10.0)
-        } else {
-            f32::from(raw) / 10.0
-        };
-        Ok((temp, humidity))
+        super::aht20_convert(&buffer)
+            .ok_or_else(|| HardwareError::Bus(format!("AHT20 status 0x{:02x}", buffer[0])))
     }
 
     /// PCT2075 board temperature: 11-bit, left-justified, 0.125 °C per LSB.
@@ -306,9 +407,10 @@ mod imp {
         const SHUNT_VOLTAGE: u8 = 0x01;
         /// 10 µV per LSB on the shunt register.
         const LSB_MICROVOLTS: f32 = 10.0;
-        /// Assumed shunt. Confirm against the board before trusting absolute values;
-        /// the fouling trend only needs the reading to be consistent.
-        const SHUNT_MILLIOHMS: f32 = 100.0;
+        /// Confirmed from the factory source: `sensors/Pump.py` configures its own
+        /// INA219 with `SHUNT_OHMS = 0.08`. The 100 mΩ assumed here previously was a
+        /// guess, and it under-reported every current by a fifth.
+        const SHUNT_MILLIOHMS: f32 = 80.0;
 
         let bus = open(expected::INA219)?;
         let mut buffer = [0u8; 2];
@@ -369,13 +471,34 @@ impl Bank {
                 tracing::debug!(%arch, "no GPIO on this build; water level unavailable");
                 None
             }
-            // On a Pi this is almost always the `gpio` group. Worth shouting about,
-            // because the symptom otherwise is simply never being told to add water.
+            // Worth shouting about, because the symptom otherwise is simply never being
+            // told to add water.
+            //
+            // `Invalid argument (os error 22)` on the echo interrupt is not a
+            // permissions problem, whatever it looks like. rppal 0.19 drives GPIO
+            // interrupts through the `GPIO_V2_*` character-device ioctls, and that uAPI
+            // arrived in Linux 5.10. This Gardyn runs 4.14, which has only the v1
+            // interface, and an unrecognised ioctl number is EINVAL. Sending someone to
+            // check `id -nG` when they are already in `gpio` wastes the one clue.
             Err(error) => {
+                let kernel_too_old = error.to_string().contains("os error 22");
                 tracing::warn!(
                     %error,
-                    "cannot open the ultrasonic sensor — water level will be missing,                      and the water rule cannot run without it. Check the agent's user                      is in the `gpio` group."
+                    "cannot open the ultrasonic sensor — water level will be missing, and \
+                     the water rule cannot run without it"
                 );
+                if kernel_too_old {
+                    tracing::warn!(
+                        "EINVAL from the echo interrupt means the kernel is older than \
+                         the GPIO v2 uAPI rppal needs (5.10; this device runs 4.14). Not \
+                         a permissions problem. Until Phase 6 the vendor's `gy_wl` owns \
+                         this sensor anyway — read its value from \
+                         /usr/local/etc/sensors/water_lvl_status instead of contending \
+                         for the trigger pin. See DESIGN.md §6."
+                    );
+                } else {
+                    tracing::warn!("check the agent's user is in the `gpio` group (`id -nG`)");
+                }
                 None
             }
         };
@@ -391,6 +514,14 @@ impl Bank {
         let mut snapshot = imp::read_sensors(now);
         if let Some(sensor) = self.ultrasonic.as_mut() {
             snapshot.water_level_mm = sensor.read_mm(snapshot.air_temp_c);
+        }
+        // Our own sensor first, the factory's file second. The order matters at Phase 6:
+        // once the vendor stack is gone its file stops being written, and this falls
+        // back to the measurement we will by then be able to take ourselves.
+        if snapshot.water_level_mm.is_none() {
+            snapshot.water_level_mm = crate::vendor::water_level()
+                .ok()
+                .and_then(|level| level.distance_mm());
         }
         snapshot
     }
@@ -427,6 +558,63 @@ pub fn ds18b20() -> Option<f32> {
 }
 
 #[cfg(test)]
+mod aht20_tests {
+    use super::aht20_convert;
+
+    /// Encode a temperature and humidity the way the part would, so a test can be
+    /// written in degrees rather than in hex.
+    fn frame(status: u8, humidity_raw: u32, temp_raw: u32) -> [u8; 6] {
+        [
+            status,
+            (humidity_raw >> 12) as u8,
+            (humidity_raw >> 4) as u8,
+            (((humidity_raw & 0x0F) << 4) | (temp_raw >> 16)) as u8,
+            (temp_raw >> 8) as u8,
+            temp_raw as u8,
+        ]
+    }
+
+    #[test]
+    fn it_decodes_the_readings_the_factory_reported() {
+        // The whole reason this is an AHT20 driver and not an AM2320 one. `gy_events`
+        // wrote 25.3387451171875 °C and 54.88100051879883 % to its status files while
+        // our AM2320 read returned nothing; those are 394992 and 575469 over 2²⁰.
+        let (temp, humidity) = aht20_convert(&frame(0x1C, 575_469, 394_992)).unwrap();
+        assert!((temp - 25.338_745).abs() < 1e-3, "{temp}");
+        assert!((humidity - 54.881_00).abs() < 1e-3, "{humidity}");
+    }
+
+    #[test]
+    fn the_two_fields_do_not_bleed_into_each_other() {
+        // They share byte 3, a nibble each, which is the easy thing to get wrong. Each
+        // case drives one field to an extreme while the other sits at a plain value, so
+        // a leaking nibble moves the answer by tens of degrees rather than subtly.
+        let (temp, humidity) = aht20_convert(&frame(0x1C, 0xF_FFFF, 262_144)).unwrap();
+        assert!((humidity - 100.0).abs() < 0.01, "{humidity}");
+        assert!(temp.abs() < 0.01, "{temp} should be 0 °C");
+
+        let (temp, humidity) = aht20_convert(&frame(0x1C, 0, 655_360)).unwrap();
+        assert!(humidity.abs() < 0.01, "{humidity}");
+        assert!((temp - 75.0).abs() < 0.01, "{temp} should be 75 °C");
+    }
+
+    #[test]
+    fn a_busy_conversion_is_no_reading_rather_than_a_stale_one() {
+        // Bit 7 means the measurement is still running and the buffer holds the
+        // previous one. We share this part with the factory's reader, so it happens.
+        assert!(aht20_convert(&frame(0x80, 575_469, 394_992)).is_none());
+    }
+
+    #[test]
+    fn an_absent_part_is_rejected_rather_than_reported_as_a_cold_room() {
+        // All zeros and all ones are what a missing or uncalibrated part looks like,
+        // and both convert to numbers a rule would happily act on.
+        assert!(aht20_convert(&[0; 6]).is_none());
+        assert!(aht20_convert(&frame(0x1C, 0xF_FFFF, 0xF_FFFF)).is_none());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -449,7 +637,10 @@ mod tests {
         let report = probe("0.1.0", t0());
         if report.board_model.is_none() {
             assert!(
-                report.warnings.iter().any(|w| w.contains("development machine")),
+                report
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("development machine")),
                 "warnings should explain the absent board: {:?}",
                 report.warnings
             );

@@ -3,13 +3,29 @@
 use crate::{Result, Store, StoreError, ts};
 use garden_auth::{
     Actor, EmailAddress, Invitation, InvitationId, Membership, PasswordDigest, Role, SecretToken,
-    Session, SessionId, User, UserId, hash_password, verify_password,
+    Session, SessionId, User, UserId, check_password_policy, hash_password, verify_password,
 };
 use garden_core::GardenId;
 use jiff::Timestamp;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 use uuid::Uuid;
+
+/// What happened when a password change was attempted.
+///
+/// An enum rather than a `Result`, because "you typed the wrong current password" and
+/// "that new password is too weak" are both expected outcomes of a person using a form
+/// — not errors in the sense the rest of the store means by that.
+#[derive(Debug, PartialEq)]
+pub enum ChangePassword {
+    Changed {
+        /// Sessions elsewhere that were signed out. Worth telling the operator: it is
+        /// the visible evidence that a password change did something.
+        other_sessions_closed: u64,
+    },
+    WrongPassword,
+    TooWeak(garden_auth::WeakPassword),
+}
 
 fn uuid(row: &SqliteRow, column: &str) -> Result<Uuid> {
     let raw: String = row.try_get(column)?;
@@ -154,6 +170,62 @@ impl Store {
 
         let token = self.open_session(user.id, now, user_agent).await?;
         Ok(Some((user, token)))
+    }
+
+    /// Change a signed-in user's password.
+    ///
+    /// **The current password is required**, and not as a formality. Without it, anyone
+    /// who got hold of a session — a borrowed laptop, a stolen cookie — could set a new
+    /// password and lock the owner out of their own garden. Knowing the old one is the
+    /// difference between "temporary access" and "permanent takeover".
+    ///
+    /// On success **every other session is closed**. A password change is what you do
+    /// when you think someone else may be signed in, and leaving their session alive
+    /// would make it ceremonial. The caller's own session is spared, so changing your
+    /// password does not immediately log you out.
+    pub async fn change_password(
+        &self,
+        user: UserId,
+        current: &str,
+        new: &str,
+        keep: &SecretToken,
+    ) -> Result<ChangePassword> {
+        let Some(row) = sqlx::query("SELECT * FROM users WHERE id = ?1")
+            .bind(user.to_string())
+            .fetch_optional(&self.db)
+            .await?
+        else {
+            return Ok(ChangePassword::WrongPassword);
+        };
+
+        let stored = PasswordDigest::from_stored(row.try_get::<String, _>("password_digest")?);
+        if !verify_password(current, &stored) {
+            return Ok(ChangePassword::WrongPassword);
+        }
+        // Checked after the current password, so an attacker cannot use the policy
+        // message to learn that they guessed the old one right.
+        if let Err(weak) = check_password_policy(new) {
+            return Ok(ChangePassword::TooWeak(weak));
+        }
+
+        let digest = hash_password(new)
+            .map_err(|e| StoreError::Corrupt(format!("password hashing: {e}")))?;
+        sqlx::query("UPDATE users SET password_digest = ?1 WHERE id = ?2")
+            .bind(digest.as_str())
+            .bind(user.to_string())
+            .execute(&self.db)
+            .await?;
+
+        let closed = sqlx::query("DELETE FROM sessions WHERE user_id = ?1 AND digest != ?2")
+            .bind(user.to_string())
+            .bind(keep.digest().as_str())
+            .execute(&self.db)
+            .await?
+            .rows_affected();
+
+        Ok(ChangePassword::Changed {
+            other_sessions_closed: closed,
+        })
     }
 
     // --- Sessions ---------------------------------------------------------------

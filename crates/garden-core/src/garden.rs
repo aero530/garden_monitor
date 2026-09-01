@@ -78,6 +78,69 @@ impl DeviceModel {
             DeviceModel::Home4 | DeviceModel::Home3 => 30,
         }
     }
+
+    /// How far a frame from this model's camera has to be turned to stand upright.
+    ///
+    /// A property of how the camera is mounted in the light bar, so it belongs to the
+    /// model rather than to the individual device — which is also how Gardyn treat it.
+    /// Their `hw_profile.py` sets `rotatePhotos` on the profile: true for both `GM`
+    /// profiles, false for both `GH` ones. That is independent evidence that the Studio
+    /// line rotates and the Home line does not.
+    ///
+    /// **Measured on a Studio 2 on 2026-08-31**: frames arrive with the towers
+    /// horizontal and the tank at image-right, so a quarter turn clockwise puts the tank
+    /// at the bottom and turns 1920×1080 into 1080×1920 — portrait, which is the shape a
+    /// tower wants. Studio 1 is inferred from the same form factor and the same
+    /// `rotatePhotos` flag; if a Studio 1 ever appears and disagrees, this is the one
+    /// place to correct.
+    pub fn camera_rotation(self) -> CameraRotation {
+        match self {
+            DeviceModel::Studio2 | DeviceModel::Studio1 => CameraRotation::Clockwise90,
+            // The Home line mounts its two cameras upright, and the simulator draws its
+            // frames the right way up to begin with.
+            DeviceModel::Home4 | DeviceModel::Home3 | DeviceModel::Simulated => {
+                CameraRotation::None
+            }
+        }
+    }
+}
+
+/// A quarter-turn rotation, clockwise.
+///
+/// Only right angles, because that is all a camera mounting produces and all that can
+/// be applied without resampling — a 90° rotation moves pixels, an arbitrary angle
+/// interpolates them, and interpolating before measuring canopy area would be inventing
+/// green that was never photographed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CameraRotation {
+    None,
+    Clockwise90,
+    Clockwise180,
+    Clockwise270,
+}
+
+impl CameraRotation {
+    pub fn degrees(self) -> u16 {
+        match self {
+            CameraRotation::None => 0,
+            CameraRotation::Clockwise90 => 90,
+            CameraRotation::Clockwise180 => 180,
+            CameraRotation::Clockwise270 => 270,
+        }
+    }
+
+    /// Whether applying this swaps width and height.
+    pub fn transposes(self) -> bool {
+        matches!(
+            self,
+            CameraRotation::Clockwise90 | CameraRotation::Clockwise270
+        )
+    }
+
+    pub fn is_none(self) -> bool {
+        self == CameraRotation::None
+    }
 }
 
 impl fmt::Display for DeviceModel {

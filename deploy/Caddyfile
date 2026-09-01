@@ -1,0 +1,63 @@
+# TLS for ntfy, and for nothing else.
+#
+# Install to /etc/garden/Caddyfile, then edit the hostname and the email.
+#
+# This is the only part of the deployment that faces the internet, and it fronts the
+# one service that holds nothing: ntfy knows your topic names and your auth database,
+# not your readings, frames, or accounts. The brain stays on the LAN — see DESIGN.md
+# §10 for why the split is worth more than a VPN on your phone.
+#
+# What you need before this works:
+#   1. A DNS name pointing at your home IP. A dynamic-DNS name is fine; ntfy only ever
+#      resolves it from the phone.
+#   2. Port 443 forwarded to this VM at the router. **Only 443.** If you find yourself
+#      forwarding 8080 you have exposed the brain, which is the thing this arrangement
+#      exists to avoid.
+#   3. Port 80 reachable *during certificate issue* — Let's Encrypt's HTTP challenge
+#      needs it. Caddy renews unattended afterwards.
+
+{
+	# Where expiry warnings go. Let's Encrypt is a certificate authority rather than a
+	# SaaS in the request path, so this stays inside §1's self-hosting rule: no third
+	# party sees a single notification.
+	email you@example.com
+}
+
+ntfy.example.com {
+	# Caddy obtains and renews the certificate by itself; there is no certbot, no cron
+	# job, and no manual step to forget in ninety days.
+	encode gzip
+
+	reverse_proxy garden-ntfy:8090 {
+		# ntfy holds a connection open for the phone to receive on. The default proxy
+		# timeouts would cut it, and the app would reconnect in a loop and eat battery.
+		flush_interval -1
+	}
+
+	# ntfy is a publish/subscribe server with no rate limiting of its own worth relying
+	# on at the edge. This bounds what an unauthenticated stranger can cost you before
+	# `auth-default-access: deny-all` turns them away.
+	rate_limit {
+		zone ntfy {
+			key {remote_host}
+			events 120
+			window 1m
+		}
+	}
+
+	header {
+		# It only ever speaks to an app, never to a browser, so there is no reason to
+		# leave it framable or sniffable.
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/ntfy.log
+		# Push traffic is one line per notification, which is worth keeping: an
+		# unexpected spike is the first sign somebody found the endpoint.
+		format json
+	}
+}

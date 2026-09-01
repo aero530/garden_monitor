@@ -4,11 +4,15 @@
 #
 # Change base-url before starting. Everything else is sensible as-is.
 
-# How your PHONE reaches this server — not how the brain reaches it. ntfy stamps
-# this into the action buttons on every notification, so if it is wrong, push
-# arrives and tapping "Done" does nothing.
-base-url: "https://ntfy.your-tailnet.ts.net"
+# How your PHONE reaches this server — not how the brain reaches it.
+#
+# The public name Caddy holds a certificate for, and it must resolve from mobile data
+# rather than only from the house: ntfy being reachable from anywhere is the whole
+# reason it is exposed while the brain is not. See DESIGN.md §10.
+base-url: "https://ntfy.example.com"
 
+# Container-internal only. Caddy reaches this over the podman network; nothing
+# publishes it to the host and nothing forwards it at the router.
 listen-http: ":8090"
 
 cache-file: "/var/cache/ntfy/cache.db"

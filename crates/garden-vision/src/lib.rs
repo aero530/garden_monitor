@@ -41,6 +41,7 @@ pub mod color;
 pub mod diagnose;
 pub mod growth;
 pub mod lens;
+pub mod orient;
 pub mod roi;
 pub mod segment;
 

@@ -33,7 +33,7 @@ use std::time::Duration;
 const SOUND_BASE_MPS: f32 = 331.3;
 /// How much it gains per degree, m/s/°C.
 const SOUND_PER_DEGREE: f32 = 0.606;
-/// Assumed air temperature when the AM2320 is not reporting.
+/// Assumed air temperature when the AHT20 is not reporting.
 ///
 /// Ignoring temperature entirely would be a systematic error, not noise: cold air is
 /// slow, so a cold room reads the water as further away — a tank that looks emptier
@@ -42,8 +42,18 @@ const ASSUMED_TEMP_C: f32 = 20.0;
 
 /// The sensor's usable range. Readings outside it are echoes off the tank wall, the
 /// sensor's own ring-down, or a missed edge — not water.
+///
+/// The old 2 m ceiling was the sensor's datasheet range, which is eight times this
+/// tank: it would accept an echo off the floor as a water reading. Now that Phase 0 has
+/// established the factory's 3–25 cm clamp is a *distance* — water was added and the
+/// reading fell — that band is the tank, and 400 mm is a ceiling with room to spare
+/// beyond an empty one at 250 mm.
+///
+/// Deliberately not narrowed to 250 mm exactly. A reading a little past empty is a real
+/// thing a nearly-dry tank does, and rejecting it would report "no water level" at the
+/// one moment the water rule most needs to fire.
 pub const MIN_RANGE_MM: f32 = 20.0;
-pub const MAX_RANGE_MM: f32 = 2_000.0;
+pub const MAX_RANGE_MM: f32 = 400.0;
 
 /// How many pulses to fire per reading.
 ///
@@ -240,7 +250,9 @@ mod tests {
 
     #[test]
     fn the_conversion_round_trips() {
-        for expected in [25.0f32, 60.0, 150.0, 330.0, 900.0] {
+        // Distances this tank actually produces: 30 mm full, 250 mm empty, and the
+        // margin either side that the accepted range deliberately keeps.
+        for expected in [25.0f32, 30.0, 56.0, 150.0, 250.0, 390.0] {
             let mm = distance_mm(echo_for(expected), Some(20.0)).unwrap();
             assert!((mm - expected).abs() < 0.5, "{expected} -> {mm}");
         }
@@ -273,7 +285,7 @@ mod tests {
 
     #[test]
     fn an_absurd_temperature_is_ignored_rather_than_trusted() {
-        // A failing AM2320 can report nonsense before it reports nothing.
+        // A failing AHT20 can report nonsense before it reports nothing.
         for silly in [f32::NAN, -300.0, 5_000.0, f32::INFINITY] {
             let mm = distance_mm(echo_for(300.0), Some(silly)).unwrap();
             assert!((mm - 300.0).abs() < 1.0, "{silly} -> {mm}");

@@ -47,6 +47,25 @@ impl Client {
             // dropped sample goes to the spool and is retried.
             .timeout(Duration::from_secs(15))
             .build()?;
+
+        // Check the spool now rather than during the outage it exists for.
+        //
+        // It is only written to when a send fails, so an unwritable directory is
+        // invisible until the brain goes down — at which point the samples the spool
+        // was meant to save are the ones lost. The default lives under /var/lib, which
+        // wants root, and on this Gardyn the agent runs as an ordinary user.
+        //
+        // A warning rather than an error: a client that cannot spool still works
+        // perfectly well while the brain is up, and refusing to start would be a worse
+        // failure than the one being reported.
+        if let Err(e) = std::fs::create_dir_all(&spool) {
+            tracing::warn!(
+                "cannot create the spool directory {}: {e}. Samples will be LOST rather \
+                 than buffered whenever the brain is unreachable. Set GARDEN_SPOOL_DIR \
+                 to somewhere writable — ~/garden-spool if you are not running as root.",
+                spool.display()
+            );
+        }
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             token: token.to_string(),

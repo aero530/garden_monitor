@@ -256,7 +256,7 @@ flowchart LR
 ```
 
 ```sh
-echo "dtoverlay=w1-gpio,gpiopin=4" | sudo tee -a /boot/firmware/config.txt
+echo "dtoverlay=w1-gpio,gpiopin=4" | sudo tee -a /boot/config.txt
 sudo reboot
 ls /sys/bus/w1/devices/     # expect a 28-xxxxxxxx entry
 ./garden-edge read          # water_temp_c should now be populated

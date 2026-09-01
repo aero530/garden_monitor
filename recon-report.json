@@ -1,0 +1,192 @@
+{
+  "agent_version": "0.1.0",
+  "captured_at": "2026-08-31T00:19:06.119662121Z",
+  "board_model": "Raspberry Pi Zero W Rev 1.1",
+  "cpu_architecture": "arm",
+  "os": "Raspbian GNU/Linux 9 (stretch)",
+  "kernel": "4.14.98+",
+  "i2c_bus": "/dev/i2c-1",
+  "i2c_devices": [
+    {
+      "address": 56,
+      "expected": "AM2320 air temp/humidity"
+    },
+    {
+      "address": 64,
+      "expected": "INA219 pump current"
+    },
+    {
+      "address": 72,
+      "expected": "PCT2075 board temp"
+    }
+  ],
+  "i2c_missing": [],
+  "cameras": [
+    {
+      "path": "/dev/video0",
+      "name": null,
+      "formats": [
+        "Pixel Format: 'MJPG' (compressed)",
+        "Pixel Format: 'YUYV'"
+      ]
+    }
+  ],
+  "one_wire_devices": [],
+  "pwm_channels": [],
+  "gpio_modes": [
+    {
+      "gpio": 0,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 1,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 2,
+      "mode": "alt0",
+      "role": null
+    },
+    {
+      "gpio": 3,
+      "mode": "alt0",
+      "role": null
+    },
+    {
+      "gpio": 4,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 5,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 6,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 7,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 8,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 9,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 10,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 11,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 12,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 13,
+      "mode": "input",
+      "role": "light button"
+    },
+    {
+      "gpio": 14,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 15,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 16,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 17,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 18,
+      "mode": "alt5",
+      "role": "grow lights, hardware PWM"
+    },
+    {
+      "gpio": 19,
+      "mode": "input",
+      "role": "ultrasonic echo"
+    },
+    {
+      "gpio": 20,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 21,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 22,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 23,
+      "mode": "input",
+      "role": null
+    },
+    {
+      "gpio": 24,
+      "mode": "output",
+      "role": "pump, digital on/off"
+    },
+    {
+      "gpio": 25,
+      "mode": "input",
+      "role": "PCB over-temperature interrupt"
+    },
+    {
+      "gpio": 26,
+      "mode": "output",
+      "role": "ultrasonic trigger"
+    },
+    {
+      "gpio": 27,
+      "mode": "input",
+      "role": null
+    }
+  ],
+  "vendor_services": [
+    "conn-string.service",
+    "gy_events.service",
+    "gy_iot.service",
+    "gy_wl.service",
+    "iot-controller.service",
+    "network-checker.service",
+    "wifi-pairing.service"
+  ],
+  "pigpiod_running": true,
+  "pigpiod_interface": "FIFO (/dev/pigpio)",
+  "warnings": [
+    "1-Wire bus not present; a DS18B20 water probe needs `dtoverlay=w1-gpio` in the boot config — /boot/config.txt on this Pi's Raspbian 9, /boot/firmware/config.txt on Bookworm and later"
+  ]
+}

@@ -362,8 +362,14 @@ async fn the_schedule_can_be_set_previewed_and_cleared() {
 }
 
 #[tokio::test]
-async fn a_schedule_that_would_overload_the_supply_is_refused() {
-    // The pump ceiling, enforced at the point a person could type past it.
+async fn a_pump_duty_outside_the_possible_range_is_refused() {
+    // This used to assert that 0.9 was refused, against a 0.30 ceiling inherited from
+    // the Home line. Phase 0 found the Studio 2's pump is a plain digital output that
+    // the factory runs flat out, so a fractional ceiling was protecting nothing while
+    // reading as though it were — and would have watered at a third of stock flow.
+    //
+    // What is still worth refusing is a duty that means nothing at all. The bound that
+    // replaced the ceiling is on *time*, not level: see `Duty::PUMP_MAX`.
     let f = fixture("overload").await;
     let err = run_failing(
         &f,
@@ -373,10 +379,24 @@ async fn a_schedule_that_would_overload_the_supply_is_refused() {
             "--garden",
             &f.garden.to_string(),
             "--pump-duty",
-            "0.9",
+            "1.4",
         ],
     );
     assert!(err.contains("ceiling"), "{err}");
+
+    // And full-on is now a legitimate thing to ask for, because it is what the factory
+    // does four times a day.
+    run(
+        &f,
+        &[
+            "schedule",
+            "set",
+            "--garden",
+            &f.garden.to_string(),
+            "--pump-duty",
+            "1.0",
+        ],
+    );
 }
 
 #[tokio::test]

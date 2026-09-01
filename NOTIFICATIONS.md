@@ -106,7 +106,7 @@ rest of the deployment.
 ```sh
 sudo mkdir -p /etc/garden-ntfy /var/lib/garden-ntfy/cache
 sudo tee /etc/garden-ntfy/server.yml >/dev/null <<'EOF'
-base-url: "http://ntfy.your-tailnet.ts.net"
+base-url: "https://ntfy.example.com"
 listen-http: ":8090"
 cache-file: "/var/cache/ntfy/cache.db"
 cache-duration: "72h"
@@ -137,7 +137,7 @@ After=network-online.target
 [Container]
 Image=docker.io/binwiederhier/ntfy:latest
 Exec=serve
-PublishPort=8090:8090
+# Not published to the host: Caddy reaches it by name and owns the only forwarded port.
 Volume=/etc/garden-ntfy/server.yml:/etc/ntfy/server.yml:Z,ro
 Volume=/var/lib/garden-ntfy:/var/lib/ntfy:Z
 Volume=/var/lib/garden-ntfy/cache:/var/cache/ntfy:Z
@@ -184,12 +184,18 @@ sudo podman exec -it systemd-garden-ntfy ntfy access phone 'garden-*' read-only
 
 ### 4. Firewall
 
+Caddy owns the only internet-facing port. ntfy is reached through it over the podman
+network, so 8090 is published nowhere and needs no rule at all.
+
 ```sh
-sudo firewall-cmd --permanent --add-port=8090/tcp --zone=internal
+sudo firewall-cmd --permanent --add-service=https --zone=public
+sudo firewall-cmd --permanent --add-service=http --zone=public   # ACME challenge only
+sudo firewall-cmd --permanent --add-port=8080/tcp --zone=internal # the brain, LAN only
 sudo firewall-cmd --reload
 ```
 
-Do **not** open 8090 to the internet. Use Tailscale — see below.
+**Forward only 443 at the router.** If you find yourself forwarding 8080 you have
+exposed the brain, which is the thing this arrangement exists to avoid.
 
 ---
 
@@ -201,7 +207,7 @@ Add to the brain's environment file:
 GARDEN_NTFY_URL=http://garden-ntfy:8090     # container name on the shared network
 GARDEN_NTFY_TOKEN=tk_xxxxxxxxxxxxxxxxxxxx
 # Must be how your phone reaches the brain, since the action buttons point here.
-GARDEN_BASE_URL=https://garden.your-tailnet.ts.net
+GARDEN_BASE_URL=http://192.168.1.20:8080   # LAN only; the buttons resolve at home
 ```
 
 ```sh
@@ -214,28 +220,40 @@ the settings page. Tasks still appear in the app; nothing is sent.
 
 ---
 
-## Tailscale — needed for the buttons to work
+## Caddy — so notifications arrive when you are out
 
-The Done / Snooze buttons are links back to the brain. On your home wifi they resolve.
-Anywhere else they do not, and tapping Done on a notification while you are out is
-exactly when you want it to work.
+**ntfy is exposed; the brain is not.** The reasoning is in DESIGN.md §10, and the short
+version is that ntfy is one upstream server holding topic names and an auth database,
+while the brain holds every reading, frame and account you have. Putting the first on
+the internet buys timely notifications. Putting the second there buys a working button.
 
-```sh
-sudo dnf install -y tailscale
-sudo systemctl enable --now tailscaled
-sudo tailscale up --advertise-tags=tag:garden
-sudo tailscale serve --bg --https=443 http://localhost:8080     # the brain
-sudo tailscale serve --bg --https=8443 http://localhost:8090    # ntfy
-```
-
-Install Tailscale on your phone, then set:
+You need a DNS name pointing at your home address — a dynamic-DNS name is fine, since
+only the phone ever resolves it — and port 443 forwarded to this VM.
 
 ```sh
-GARDEN_BASE_URL=https://garden.your-tailnet.ts.net
-# and drop GARDEN_INSECURE_COOKIES — Tailscale gives you real HTTPS.
+sudo mkdir -p /var/lib/garden-caddy /var/log/garden-caddy
+sudo install -m644 deploy/Caddyfile /etc/garden/Caddyfile
+sudo $EDITOR /etc/garden/Caddyfile          # hostname and email
+sudo install -m644 deploy/quadlet/garden-caddy.container /etc/containers/systemd/
+sudo systemctl daemon-reload
+sudo systemctl start garden-caddy
+journalctl -u garden-caddy | grep -i certificate
 ```
 
-This is also what lets you drop `GARDEN_INSECURE_COOKIES`, which you should.
+Caddy obtains and renews the certificate itself. There is no certbot and no cron job to
+forget in ninety days.
+
+### What this deliberately does not fix
+
+The Done / Snooze buttons are links back to the *brain*, so they resolve on your home
+wifi and not anywhere else. That is the accepted cost, and it is smaller than it sounds
+because auto-verification runs both ways: doing the work moves a sensor, and the task
+completes itself without a tap. Nearly everything this system asks of you needs you
+standing at the garden anyway.
+
+`GARDEN_BASE_URL` therefore stays a LAN address, and `GARDEN_INSECURE_COOKIES` stays
+set — the brain is plain HTTP on the LAN, and a `__Host-` cookie over plain HTTP fails
+in a way that looks like a wrong password.
 
 ---
 
@@ -243,7 +261,7 @@ This is also what lets you drop `GARDEN_INSECURE_COOKIES`, which you should.
 
 1. Install **ntfy** — [iOS](https://apps.apple.com/app/ntfy/id1625396347),
    [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy) or F-Droid.
-2. Settings → **Default server** → your Tailscale ntfy URL.
+2. Settings → **Default server** → `https://ntfy.example.com`, your public name.
 3. Sign in as the read-only `phone` user.
 4. **Subscribe to a topic.** Pick something unguessable — `garden-phil-8f3a2c`, not
    `garden`. Anyone who knows the topic can publish to it.
@@ -328,9 +346,12 @@ channels.
 From the brain's container: `curl -v http://garden-ntfy:8090/v1/health`. If that fails,
 the two containers are not on the same Podman network.
 
-**Notifications arrive but the buttons do nothing.** `GARDEN_BASE_URL` is a URL your
-phone cannot resolve. It must be the Tailscale name, not `localhost` or a LAN IP you
-are not currently on.
+**Notifications arrive but the buttons do nothing.** Two different causes, and the
+second is not a fault. Either `GARDEN_BASE_URL` is `localhost` rather than the LAN
+address — it is stamped into the links at send time, so it has to be a name the *phone*
+resolves — or you are not on the home wifi, in which case this is the design working as
+chosen. The brain is deliberately not exposed; see DESIGN.md §10. Do the work and the
+task will complete itself when the sensor moves.
 
 **"That link has already been used."** Working as intended — action links are
 single-use, because they travel through push relays and sit on lock screens.

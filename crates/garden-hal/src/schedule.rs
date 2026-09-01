@@ -50,7 +50,8 @@ pub struct Schedule {
     pub pump_on_minutes: f32,
     /// Length of one pump cycle.
     pub pump_cycle_minutes: f32,
-    /// Duty while the pump runs. Clamped to [`Duty::PUMP_MAX`] whatever is asked for.
+    /// Duty while the pump runs. On this hardware the pump is a switch, so anything
+    /// non-zero means on — see `Duty::PUMP_MAX` for why the field survives anyway.
     pub pump_duty: f32,
 }
 
@@ -61,29 +62,49 @@ impl Schedule {
     /// catalogue. The pump runs through the dark hours too — roots do not stop needing
     /// water when the lights go off, and a schedule that tied them together would dry
     /// the tower out overnight.
+    ///
+    /// **Pump timing is the factory's, by decision on 2026-08-30**: four five-minute
+    /// runs a day. This used to be fifteen minutes in every hour — six hours a day
+    /// against the factory's twenty minutes — which was a guess made before anyone had
+    /// read the stock schedule. See `baseline/factory-schedule.md`. The lighting is
+    /// still our own: a longer photoperiod at lower output than the factory's
+    /// thirteen-hour block at 100%.
     pub const DEFAULT: Schedule = Schedule {
         light_start_hour: 6,
         light_hours: 16.0,
         light_duty: 0.85,
         ramp_minutes: 30.0,
-        pump_on_minutes: 15.0,
-        pump_cycle_minutes: 60.0,
-        pump_duty: 0.25,
+        pump_on_minutes: 5.0,
+        pump_cycle_minutes: 360.0,
+        // On. Binary hardware, so any non-zero value means the same thing; 1.0 says so.
+        pump_duty: 1.0,
     };
 
-    /// The conservative programme the failsafe runs.
+    /// The programme the failsafe runs: **the factory's own**, as far as this model
+    /// can express it. See `baseline/factory-schedule.md`.
     ///
-    /// Chosen to be adequate for everything in the catalogue rather than optimal for
-    /// anything, and with no ramp: a failsafe should keep plants alive until someone
-    /// notices, and simpler is easier to be sure of.
+    /// This used to be a set of defensible guesses — 14 hours from midnight, pump 15
+    /// minutes in every hour. Phase 0 read the stock schedule off the device, and the
+    /// guesses were not close. The factory pumps for **20 minutes a day**, in four
+    /// five-minute runs; the old failsafe pumped for six hours. Whichever of those is
+    /// better for the plants, only one of them is a programme these particular plants
+    /// are known to have survived, and that is the one a failsafe should run.
+    ///
+    /// Light 07:00–22:00, an hour ramping at each end against the factory's hour at
+    /// half output — not identical, but the same shape and a similar daily total. Pump
+    /// every six hours rather than at the factory's four uneven times, because a
+    /// cycle length is all this model holds and four runs a day is the part that
+    /// matters.
     pub const FAILSAFE: Schedule = Schedule {
-        light_start_hour: 0,
-        light_hours: 14.0,
-        light_duty: 0.80,
-        ramp_minutes: 0.0,
-        pump_on_minutes: 15.0,
-        pump_cycle_minutes: 60.0,
-        pump_duty: 0.25,
+        light_start_hour: 7,
+        light_hours: 15.0,
+        light_duty: 1.0,
+        ramp_minutes: 60.0,
+        pump_on_minutes: 5.0,
+        pump_cycle_minutes: 360.0,
+        // Full on, which is what the factory does. The 30% ceiling this was written
+        // against has since been retired — see `Duty::PUMP_MAX`.
+        pump_duty: 1.0,
     };
 
     /// What to drive at `seconds_since_midnight`, local time.
@@ -91,9 +112,10 @@ impl Schedule {
         Setpoint {
             light: Duty::new(self.light_level(seconds_since_midnight)),
             pump: if self.pump_running(seconds_since_midnight) {
-                // Always through `Duty::pump`, which clamps to the current ceiling
-                // regardless of what the schedule asks for. A schedule arriving over
-                // the network must not be able to exceed the supply's budget.
+                // Still through `Duty::pump`, which clamps whatever the schedule asks
+                // for. The ceiling is now 1.0 rather than 0.30, so this bounds nonsense
+                // rather than current — but a schedule arriving over the network is
+                // exactly the thing that should not be trusted to be sane.
                 Duty::pump(self.pump_duty)
             } else {
                 Duty::OFF
@@ -281,17 +303,32 @@ mod tests {
 
     #[test]
     fn the_pump_cycles_and_keeps_going_through_the_night() {
-        let s = Schedule::DEFAULT; // 15 minutes in every 60.
+        let s = Schedule::DEFAULT; // 5 minutes in every 360, as the factory runs it.
         assert!(!s.setpoint(0).pump.is_off());
-        assert!(!s.setpoint(14 * MINUTE).pump.is_off());
-        assert!(s.setpoint(16 * MINUTE).pump.is_off());
-        assert!(s.setpoint(59 * MINUTE).pump.is_off());
-        assert!(!s.setpoint(HOUR).pump.is_off(), "next cycle");
+        assert!(!s.setpoint(4 * MINUTE).pump.is_off());
+        assert!(s.setpoint(6 * MINUTE).pump.is_off());
+        assert!(s.setpoint(5 * HOUR).pump.is_off());
+        assert!(!s.setpoint(6 * HOUR).pump.is_off(), "next cycle");
 
-        // Roots do not stop needing water when the lights go off.
-        let night = s.setpoint(3 * HOUR);
+        // Roots do not stop needing water when the lights go off. Both the 00:00 and
+        // the 18:00 cycle fall outside the 06:00–22:00 photoperiod.
+        let night = s.setpoint(0);
         assert!(night.light.is_off());
         assert!(!night.pump.is_off());
+    }
+
+    #[test]
+    fn the_default_and_the_failsafe_pump_for_as_long_as_the_factory_does() {
+        // Twenty minutes a day, per baseline/factory-schedule.md. Both of these used to
+        // run the pump for six hours a day on a figure nobody had checked, so the
+        // assertion is on the daily total rather than on the cycle constants.
+        for schedule in [Schedule::DEFAULT, Schedule::FAILSAFE] {
+            let minutes = (0..86_400)
+                .step_by(60)
+                .filter(|s| !schedule.setpoint(*s).pump.is_off())
+                .count();
+            assert_eq!(minutes, 20, "{minutes} minutes a day for {schedule:?}");
+        }
     }
 
     #[test]
@@ -304,17 +341,40 @@ mod tests {
 
     #[test]
     fn a_schedule_can_never_drive_the_pump_past_its_ceiling() {
-        // The invariant that protects the supply, tested against a schedule that
-        // explicitly asks to break it — as one arriving over the network might.
-        let greedy = Schedule {
+        // Full-on is now legitimate — it is what the factory does four times a day —
+        // so the schedule that used to be the "greedy" one is simply the correct one.
+        let full = Schedule {
             pump_duty: 1.0,
             ..Schedule::DEFAULT
         };
+        assert_eq!(full.validate(), Ok(()));
+
+        // Nonsense is still refused, at validation and again in the type, because a
+        // schedule arriving over the network is not to be trusted with either.
+        let absurd = Schedule {
+            pump_duty: 4.0,
+            ..Schedule::DEFAULT
+        };
+        assert_eq!(absurd.validate(), Err(ScheduleError::PumpDuty(4.0)));
         for second in (0..86_400).step_by(300) {
-            assert!(greedy.setpoint(second).pump.get() <= Duty::PUMP_MAX);
+            assert!(absurd.setpoint(second).pump.get() <= Duty::PUMP_MAX);
         }
-        // ...and validation refuses it before it ever gets that far.
-        assert_eq!(greedy.validate(), Err(ScheduleError::PumpDuty(1.0)));
+    }
+
+    #[test]
+    fn nothing_yet_bounds_how_long_a_schedule_may_run_the_pump() {
+        // Recorded rather than asserted-away, because it is the gap left by retiring the
+        // duty ceiling. The factory's guardian forces the pump off after fifteen
+        // minutes; `validate` will happily accept a schedule that runs it for six hours,
+        // and on binary hardware that is six hours of pumping rather than six hours at
+        // 30%. Phase 6 owes the actuator layer that guard — see `Duty::PUMP_MAX`.
+        let all_day = Schedule {
+            pump_on_minutes: 360.0,
+            pump_cycle_minutes: 360.0,
+            ..Schedule::DEFAULT
+        };
+        assert_eq!(all_day.validate(), Ok(()), "still accepted today");
+        assert!(!all_day.setpoint(3 * HOUR).pump.is_off());
     }
 
     #[test]

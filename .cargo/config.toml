@@ -1,0 +1,26 @@
+# Cross-compiling for the Gardyn's Pi Zero W.
+#
+# The device is an original Pi Zero W: BCM2835, ARMv6 with VFPv2, running Raspbian 9
+# with glibc 2.24. Static musl sidesteps that ancient glibc rather than trying to
+# match it, and every dependency `garden-edge` and `garden-guard` pull in is pure
+# Rust — so the only thing missing is a linker, and rustup already ships one.
+#
+#   rustup target add arm-unknown-linux-musleabihf
+#   cargo build --release -p garden-edge -p garden-guard \
+#     --target arm-unknown-linux-musleabihf
+#
+# No zig, no `cross`, no container, no C cross toolchain. `rust-lld` resolves out of
+# the toolchain's own sysroot, so this works unchanged on any machine with rustup.
+#
+# Name the two crates: the workspace as a whole pulls in libsqlite3-sys and ring,
+# which are C and would need a real cross compiler for a target they never run on.
+[target.arm-unknown-linux-musleabihf]
+linker = "rust-lld"
+rustflags = [
+    # Invoke lld directly rather than through a `cc` driver that is not there, and let
+    # rustc supply musl's own crt objects and libc.a from the sysroot.
+    "-C", "linker-flavor=ld.lld",
+    "-C", "link-self-contained=yes",
+    # 3.6 MB rather than 5.7 MB, on a device whose storage is an SD card.
+    "-C", "strip=symbols",
+]

@@ -11,7 +11,9 @@ Wants=network-online.target
 [Container]
 Image=docker.io/binwiederhier/ntfy:v2
 Exec=serve
-PublishPort=8090:8090
+# Deliberately not published to the host. Caddy reaches it by container name over the
+# shared network and owns the only port the router forwards, so there is exactly one
+# internet-facing process and it is not this one. See DESIGN.md §10.
 Volume=/etc/garden/ntfy-server.yml:/etc/ntfy/server.yml:Z,ro
 Volume=/var/lib/garden-ntfy:/var/lib/ntfy:Z
 Volume=/var/cache/garden-ntfy:/var/cache/ntfy:Z

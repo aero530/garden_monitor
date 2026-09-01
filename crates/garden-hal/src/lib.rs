@@ -7,9 +7,11 @@
 //! should not be gated on hardware.
 
 pub mod handover;
+pub mod pump_guard;
 pub mod schedule;
 
 pub use handover::{GuardMarker, Heartbeat};
+pub use pump_guard::{MAX_RUN as PUMP_MAX_RUN, PumpGuard};
 pub use schedule::{Schedule, ScheduleError, Setpoint};
 
 use garden_core::{CapabilitySet, SensorSnapshot};
@@ -61,14 +63,29 @@ impl Duty {
     pub const OFF: Duty = Duty(0.0);
     pub const FULL: Duty = Duty(1.0);
 
-    /// Hard ceiling on pump duty.
+    /// Hard ceiling on pump duty. **Retired to 1.0 on 2026-09-01, and here is why.**
     ///
-    /// Full-on is believed to exceed the supply's current budget, so the cap is
-    /// enforced in the type rather than left to calling code to remember. This is the
-    /// single most consequential invariant in the edge agent: exceeding it risks the
-    /// power supply, and after firmware takeover there is no vendor firmware left to
-    /// catch the mistake.
-    pub const PUMP_MAX: f32 = 0.30;
+    /// It was 0.30, on garden-of-eden's note that full-on likely exceeds the supply's
+    /// current budget on the Home line. Phase 0 found that the Studio 2's pump is not
+    /// modulated at all: the factory writes GPIO24 high or low, runs it flat out four
+    /// times a day for five minutes, and thirteen hours of capture never saw pigpio
+    /// report a duty cycle for that pin. There is no evidence the pump *can* be dimmed,
+    /// and the drivers now switch it rather than modulate it.
+    ///
+    /// A fractional ceiling on a binary output is not a safety feature, it is a
+    /// misleading one — it reads as protection while protecting nothing, and it would
+    /// have had us watering at a third of the factory's flow.
+    ///
+    /// **The real bound is on-time, not duty**, which is also what Gardyn implement: a
+    /// guardian thread forces the pump off after `MAX_WATER_TIME`, fifteen minutes,
+    /// three times the scheduled run. [`PumpGuard`] is our copy of it, and it is what
+    /// now holds whatever a schedule from the brain asks for — `Schedule::validate`
+    /// will still accept `pump_on_minutes: 360`, and the guard is what makes that
+    /// survivable. See DESIGN.md §5.
+    ///
+    /// What survives here is only that a duty is a fraction: a schedule cannot ask for
+    /// 4.0 and have it mean anything.
+    pub const PUMP_MAX: f32 = 1.0;
 
     /// A general duty, clamped to the valid range.
     pub fn new(v: f32) -> Self {
@@ -203,9 +220,15 @@ mod tests {
     }
 
     #[test]
-    fn pump_duty_cannot_exceed_the_current_budget() {
-        assert_eq!(Duty::pump(1.0).get(), Duty::PUMP_MAX);
-        assert_eq!(Duty::pump(0.9).get(), Duty::PUMP_MAX);
+    fn a_pump_duty_is_still_bounded_to_a_fraction() {
+        // The ceiling was 0.30 and is now 1.0, because the Studio 2's pump is a plain
+        // digital output that the factory runs flat out — see `Duty::PUMP_MAX`. What
+        // remains is that a duty is a fraction: a schedule arriving over the network
+        // cannot ask for 4.0 and have it mean anything.
+        assert_eq!(Duty::pump(1.0).get(), 1.0);
+        assert_eq!(Duty::pump(4.0).get(), Duty::PUMP_MAX);
+        assert_eq!(Duty::pump(-1.0).get(), 0.0);
+        assert_eq!(Duty::pump(f32::NAN).get(), 0.0);
         assert_eq!(Duty::pump(0.2).get(), 0.2);
     }
 

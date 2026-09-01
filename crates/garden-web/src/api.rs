@@ -217,10 +217,11 @@ async fn upload_frame(
     let garden: GardenId = id
         .parse()
         .map_err(|_| AppError::bad_request("garden must be a valid id"))?;
-    // Confirm the garden exists before writing a file for it.
-    if state.store.find_garden(garden).await?.is_none() {
+    // Confirm the garden exists before writing a file for it. The model is needed too:
+    // it decides which way up the camera is mounted.
+    let Some(record) = state.store.find_garden(garden).await? else {
         return Err(AppError::NotFound);
-    }
+    };
 
     let header_i64 = |name: &str| -> Option<i64> {
         headers.get(name)?.to_str().ok()?.trim().parse().ok()
@@ -238,8 +239,35 @@ async fn upload_frame(
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| matches!(v.trim(), "1" | "true" | "yes"));
 
-    let width = header_i64("x-width").unwrap_or(0).clamp(0, 100_000) as u32;
-    let height = header_i64("x-height").unwrap_or(0).clamp(0, 100_000) as u32;
+    // Turned the right way up before anything else sees it.
+    //
+    // The Studio 2's camera lies sideways in the light bar, so a frame arrives with the
+    // towers horizontal. Rotating here rather than in each consumer means the stored
+    // file, the recorded dimensions, the ROI map and the dashboard are all in one
+    // coordinate space — and that the Pi, which would have to decode and re-encode a
+    // JPEG on a single ARMv6 core, never has to touch it.
+    //
+    // The agent's own width and height headers describe the frame as shot, so they are
+    // taken from the rotated image instead: believing the headers would leave a 1080×1920
+    // file recorded as 1920×1080, and `roi` rejects a frame whose size disagrees with the
+    // map rather than rescaling it.
+    let rotation = record.model.camera_rotation();
+    let (bytes, width, height) = match garden_vision::orient::orient(&body, rotation) {
+        Ok(oriented) => (
+            std::borrow::Cow::Owned(oriented.bytes),
+            oriented.width,
+            oriented.height,
+        ),
+        // An undecodable body is still worth keeping: `put_frame` sniffs the bytes and
+        // will reject it if it is not an image at all, and that is a better place for
+        // that judgement than here.
+        Err(e) => {
+            tracing::warn!(%garden, %e, "could not orient the frame; storing it as shot");
+            let width = header_i64("x-width").unwrap_or(0).clamp(0, 100_000) as u32;
+            let height = header_i64("x-height").unwrap_or(0).clamp(0, 100_000) as u32;
+            (std::borrow::Cow::Borrowed(body.as_ref()), width, height)
+        }
+    };
 
     let stored = state
         .store
@@ -251,7 +279,7 @@ async fn upload_frame(
             light_duty_milli,
             comparable,
             source: FrameSource::Agent,
-            bytes: &body,
+            bytes: &bytes,
         })
         .await?;
 
@@ -262,8 +290,18 @@ async fn upload_frame(
             // pipeline cannot read it, and an agent that gets a 500 for an unanalysable
             // frame will retry it forever.
             if let Some(measured) =
-                crate::vision::analyse_and_store(&state.store, garden, frame.id, &body, captured_at)
-                    .await
+                // The rotated bytes, not `body`. The ROI map is in the upright frame's
+                // coordinate space, so analysing the frame as shot would measure the
+                // wrong rectangle for every slot — and silently, because a plausible
+                // canopy area comes back either way.
+                crate::vision::analyse_and_store(
+                    &state.store,
+                    garden,
+                    frame.id,
+                    &bytes,
+                    captured_at,
+                )
+                .await
             {
                 tracing::debug!(%garden, measured, "frame analysed");
             }
@@ -331,6 +369,66 @@ mod tests {
             HeaderValue::from_static("Basic s3cret-agent-token"),
         );
         assert!(authorize_agent(&state, &headers).is_err());
+    }
+
+    /// A landscape JPEG, the shape the Studio 2's camera actually produces.
+    fn landscape_jpeg() -> Bytes {
+        let img = image::RgbImage::from_pixel(320, 180, image::Rgb([20, 120, 40]));
+        let mut out = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90)
+            .encode_image(&image::DynamicImage::ImageRgb8(img))
+            .unwrap();
+        Bytes::from(out)
+    }
+
+    async fn upload_to(model: garden_core::DeviceModel) -> garden_store::frames::Frame {
+        let state = state_with(Some("t")).await;
+        let owner = state
+            .store
+            .create_user(
+                garden_auth::EmailAddress::parse("phil@example.com").unwrap(),
+                "Phil",
+                "a long enough password",
+                state.now(),
+            )
+            .await
+            .unwrap();
+        let garden = state
+            .store
+            .create_garden("Kitchen", model, "UTC", owner.id, state.now())
+            .await
+            .unwrap();
+        let mut headers = bearer("t");
+        // Deliberately the dimensions *as shot*, which is what the agent sends.
+        headers.insert("x-width", HeaderValue::from_static("320"));
+        headers.insert("x-height", HeaderValue::from_static("180"));
+        let _accepted = upload_frame(
+            State(state.clone()),
+            Path(garden.id.to_string()),
+            headers,
+            landscape_jpeg(),
+        )
+        .await
+        .expect("the upload should succeed");
+        state.store.latest_frame(garden.id).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_studio_2_frame_is_stored_upright() {
+        // The camera lies sideways in the light bar, so 320×180 as shot must be recorded
+        // as 180×320. Believing the agent's headers instead would leave a portrait file
+        // described as landscape, and `roi` rejects a frame whose size disagrees with
+        // the map rather than rescaling it — so every slot measurement would stop.
+        let frame = upload_to(garden_core::DeviceModel::Studio2).await;
+        assert_eq!((frame.width, frame.height), (180, 320));
+    }
+
+    #[tokio::test]
+    async fn a_home_frame_is_stored_exactly_as_shot() {
+        // The Home line mounts its cameras upright, and a rotation of zero must not cost
+        // a lossy re-encode.
+        let frame = upload_to(garden_core::DeviceModel::Home4).await;
+        assert_eq!((frame.width, frame.height), (320, 180));
     }
 
     #[tokio::test]

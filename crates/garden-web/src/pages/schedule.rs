@@ -275,8 +275,14 @@ mod tests {
     #[test]
     fn a_pump_setting_above_the_ceiling_is_refused_not_quietly_reduced() {
         // Clamping would leave the operator believing the garden runs what they typed.
-        let s = form(85.0, 90.0).into_schedule();
-        assert!(s.validate().is_err());
+        //
+        // 90% used to be over the ceiling and is now fine — the Studio 2's pump is a
+        // switch the factory runs flat out, so the 30% figure inherited from the Home
+        // line was retired. The form still cannot express a duty that is not a
+        // percentage, and that is what stays refused.
+        assert_eq!(form(85.0, 90.0).into_schedule().validate(), Ok(()));
+        assert_eq!(form(85.0, 100.0).into_schedule().validate(), Ok(()));
+        assert!(form(85.0, 140.0).into_schedule().validate().is_err());
     }
 
     #[test]
@@ -291,10 +297,18 @@ mod tests {
     fn the_preview_shows_the_lights_off_overnight_and_the_pump_still_running() {
         // The single most surprising thing about the default programme, and the thing
         // an operator should be able to confirm at a glance rather than trust.
+        //
+        // Asked of the whole night rather than of 03:00, because the pump now follows
+        // the factory's four short cycles a day instead of running a quarter of every
+        // hour — so "is it on at this particular moment" is the wrong question, and the
+        // hour this used to name happens to fall between runs.
         let s = Schedule::DEFAULT;
-        let night = s.setpoint(3 * 3600);
-        assert!(night.light.is_off());
-        assert!(!night.pump.is_off());
+        let dark_and_pumping = (0..86_400).step_by(60).any(|second| {
+            let setpoint = s.setpoint(second);
+            setpoint.light.is_off() && !setpoint.pump.is_off()
+        });
+        assert!(s.setpoint(3 * 3600).light.is_off(), "03:00 should be dark");
+        assert!(dark_and_pumping, "the pump should run at some point after dark");
     }
 
     #[test]

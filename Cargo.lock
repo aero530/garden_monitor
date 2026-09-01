@@ -694,6 +694,7 @@ dependencies = [
  "garden-hal",
  "garden-proto",
  "jiff",
+ "libc",
  "reqwest",
  "rppal",
  "serde",

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Keep a DreamHost A record pointing at this house.
+#
+# Residential addresses move. When yours does, the phone stops resolving ntfy and
+# notifications stop arriving — silently, because nothing on this end fails.
+#
+#   sudo install -m0755 deploy/garden-ddns /usr/local/bin/garden-ddns
+#   sudo install -m0600 /dev/null /etc/garden/ddns.env   # then fill it in
+#
+# /etc/garden/ddns.env:
+#   DREAMHOST_KEY=XXXXXXXXXXXXXXXX
+#   DDNS_RECORD=ntfy.yourdomain.com
+#
+# The key comes from the DreamHost panel under the API section. Give it only the
+# `dns-*` permissions — it needs nothing else, and a key that can also touch billing
+# is a key you do not want in a cron job.
+#
+# ⚠ The API's exact parameters are DreamHost's to change. This matches their
+# documented `dns-list_records` / `dns-add_record` / `dns-remove_record` commands as of
+# writing; check their API docs if it starts failing rather than assuming the record is
+# wrong. Run it once by hand before trusting it to a timer.
+
+set -euo pipefail
+
+ENV_FILE="${DDNS_ENV:-/etc/garden/ddns.env}"
+[ -r "$ENV_FILE" ] || { echo "cannot read $ENV_FILE" >&2; exit 1; }
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+
+: "${DREAMHOST_KEY:?set DREAMHOST_KEY in $ENV_FILE}"
+: "${DDNS_RECORD:?set DDNS_RECORD in $ENV_FILE}"
+
+API="https://api.dreamhost.com/"
+
+api() {
+  # `--fail-with-body` so an HTTP error still shows what the API said, which is where
+  # the useful part of a DreamHost error lives.
+  curl -sS --fail-with-body --max-time 30 \
+    --data-urlencode "key=$DREAMHOST_KEY" \
+    --data-urlencode "format=json" \
+    "$@" "$API"
+}
+
+# Two independent sources, because a single one returning a proxy's address or an empty
+# body would cheerfully point your domain at nothing.
+current_ip() {
+  local a b
+  a="$(curl -4sS --max-time 15 https://api.ipify.org || true)"
+  b="$(curl -4sS --max-time 15 https://ifconfig.me/ip || true)"
+  if [ -n "$a" ] && [ "$a" = "$b" ]; then
+    printf '%s' "$a"
+    return 0
+  fi
+  echo "could not agree on a public IP (got '$a' and '$b'); leaving DNS alone" >&2
+  return 1
+}
+
+wanted="$(current_ip)"
+case "$wanted" in
+  *[!0-9.]*|"") echo "'$wanted' is not an IPv4 address" >&2; exit 1 ;;
+esac
+
+listed="$(api --data-urlencode "cmd=dns-list_records")"
+# The A record for exactly this name, if there is one. No jq dependency: this runs on a
+# minimal Fedora install where adding one is a whole extra decision.
+existing="$(printf '%s' "$listed" \
+  | tr ',' '\n' \
+  | grep -A2 "\"record\":\"$DDNS_RECORD\"" \
+  | grep -m1 '"value"' \
+  | sed 's/.*"value":"\([^"]*\)".*/\1/' || true)"
+
+if [ "$existing" = "$wanted" ]; then
+  echo "$DDNS_RECORD is already $wanted"
+  exit 0
+fi
+
+echo "$DDNS_RECORD: ${existing:-<none>} -> $wanted"
+
+# DreamHost has no update command, so this is remove-then-add and there is a brief
+# window with no record. Unavoidable, and the reason the add is checked rather than
+# assumed: failing here without noticing leaves the name pointing nowhere.
+if [ -n "$existing" ]; then
+  api --data-urlencode "cmd=dns-remove_record" \
+      --data-urlencode "record=$DDNS_RECORD" \
+      --data-urlencode "type=A" \
+      --data-urlencode "value=$existing" >/dev/null
+fi
+
+result="$(api --data-urlencode "cmd=dns-add_record" \
+              --data-urlencode "record=$DDNS_RECORD" \
+              --data-urlencode "type=A" \
+              --data-urlencode "value=$wanted")"
+
+case "$result" in
+  *'"result":"success"'*) echo "updated" ;;
+  *) echo "add failed, and the old record is already gone: $result" >&2; exit 1 ;;
+esac

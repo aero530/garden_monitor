@@ -195,9 +195,9 @@ mod tests {
 
     #[test]
     fn a_degraded_heartbeat_carries_its_reason() {
-        let beat = HeartbeatRequest::degraded("0.1.0", "AM2320 read timeout");
+        let beat = HeartbeatRequest::degraded("0.1.0", "AHT20 read timeout");
         assert_eq!(beat.status, "degraded");
-        assert_eq!(beat.detail.as_deref(), Some("AM2320 read timeout"));
+        assert_eq!(beat.detail.as_deref(), Some("AHT20 read timeout"));
     }
 
     #[test]

@@ -14,12 +14,13 @@ mod camera;
 mod hardware;
 mod pwm_watch;
 mod ultrasonic;
+mod vendor;
 
 use brain::{AGENT_VERSION, Client};
 use clap::{Parser, Subcommand};
 use garden_core::{GardenId, Timestamp};
-use garden_proto::HeartbeatRequest;
 use garden_hal::{Heartbeat, Schedule};
+use garden_proto::HeartbeatRequest;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -30,7 +31,12 @@ struct Cli {
     command: Command,
 
     /// Brain base URL.
-    #[arg(long, env = "GARDEN_BRAIN_URL", global = true, default_value = "http://localhost:8080")]
+    #[arg(
+        long,
+        env = "GARDEN_BRAIN_URL",
+        global = true,
+        default_value = "http://localhost:8080"
+    )]
     brain_url: String,
 
     /// Shared agent token, matching GARDEN_AGENT_TOKEN on the brain.
@@ -42,7 +48,12 @@ struct Cli {
     garden: Option<String>,
 
     /// Where unsent samples are buffered when the brain is unreachable.
-    #[arg(long, env = "GARDEN_SPOOL_DIR", global = true, default_value = "/var/lib/garden/spool")]
+    #[arg(
+        long,
+        env = "GARDEN_SPOOL_DIR",
+        global = true,
+        default_value = "/var/lib/garden/spool"
+    )]
     spool: PathBuf,
 }
 
@@ -146,6 +157,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match &cli.command {
         Command::Probe { out } => return probe(out),
         Command::Read => return read_once(),
+        // `capture --out` writes a file and nothing else, so it has no business
+        // demanding a token and a garden id. Taking one frame to look at is the first
+        // thing anyone does with a camera on an unfamiliar device — on this one, to
+        // find out which way up the `hw_gm20` profile's `rotatePhotos` leaves it.
+        Command::Capture { out: Some(path) } if cli.token.is_empty() => {
+            return capture_to_file(path);
+        }
         Command::WatchPwm {
             out,
             interval_seconds,
@@ -159,6 +177,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime.block_on(async_main(cli))
 }
 
+/// A duration as something to read rather than a pile of seconds.
+fn humanise(age: Duration) -> String {
+    let seconds = age.as_secs();
+    match seconds {
+        0..=90 => format!("{seconds}s"),
+        91..=5400 => format!("{}m", seconds / 60),
+        _ => format!("{}h{}m", seconds / 3600, (seconds % 3600) / 60),
+    }
+}
+
+/// Take one frame and write it, with no brain and no network.
+fn capture_to_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let frame = camera::capture()?;
+    std::fs::write(path, &frame.bytes)?;
+    println!(
+        "wrote {} — {}x{}, {} KiB",
+        path.display(),
+        frame.width,
+        frame.height,
+        frame.bytes.len() / 1024
+    );
+    println!("not uploaded: GARDEN_AGENT_TOKEN is unset, so this was a local capture only");
+    Ok(())
+}
+
 fn probe(out: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let report = hardware::probe(AGENT_VERSION, Timestamp::now());
     let json = serde_json::to_string_pretty(&report)?;
@@ -166,10 +209,19 @@ fn probe(out: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Garden edge recon — agent {AGENT_VERSION}");
     println!();
-    println!("  board    {}", report.board_model.as_deref().unwrap_or("unknown"));
-    println!("  arch     {}", report.cpu_architecture.as_deref().unwrap_or("unknown"));
+    println!(
+        "  board    {}",
+        report.board_model.as_deref().unwrap_or("unknown")
+    );
+    println!(
+        "  arch     {}",
+        report.cpu_architecture.as_deref().unwrap_or("unknown")
+    );
     println!("  os       {}", report.os.as_deref().unwrap_or("unknown"));
-    println!("  kernel   {}", report.kernel.as_deref().unwrap_or("unknown"));
+    println!(
+        "  kernel   {}",
+        report.kernel.as_deref().unwrap_or("unknown")
+    );
     println!();
 
     println!("  I²C devices:");
@@ -196,6 +248,41 @@ fn probe(out: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
             "none"
         }
     );
+
+    // The Phase 1 gate. Worth its own line rather than being left to the warnings,
+    // because a parity capture that cannot see the pins fails silently for a fortnight.
+    println!(
+        "  PWM readable: {}",
+        match (&report.pigpiod_interface, report.pwm_channels.is_empty()) {
+            (Some(interface), _) => format!("yes, via pigpio's {interface}"),
+            (None, false) => "yes, via /sys/class/pwm".to_string(),
+            (None, true) => "NO — parity capture would record nothing".to_string(),
+        }
+    );
+
+    if !report.gpio_modes.is_empty() {
+        println!(
+            "  GPIO: {} mapped, {} free{}",
+            report.gpio_modes.len(),
+            report.free_gpios().len(),
+            match report.suggested_one_wire_gpio() {
+                // Naming one is what makes this actionable — it is the pin the
+                // DS18B20 overlay will point at.
+                Some(pin) => format!(" — put the DS18B20 on GPIO{pin}"),
+                None => String::new(),
+            }
+        );
+        for (gpio, _, _) in garden_proto::recon::expected::PIN_ROLES {
+            if let Some(pin) = report.gpio_modes.iter().find(|p| p.gpio == *gpio) {
+                println!(
+                    "    GPIO{:<2} {:<7} {}",
+                    pin.gpio,
+                    pin.mode,
+                    pin.role.as_deref().unwrap_or("")
+                );
+            }
+        }
+    }
 
     if !report.vendor_services.is_empty() {
         println!("  vendor services still running:");
@@ -224,7 +311,46 @@ fn read_once() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", serde_json::to_string_pretty(&snapshot)?);
     let capabilities: Vec<_> = snapshot.capabilities().iter().map(|c| c.label()).collect();
     println!();
-    println!("capabilities this reading demonstrates: {}", capabilities.join(", "));
+    println!(
+        "capabilities this reading demonstrates: {}",
+        capabilities.join(", ")
+    );
+
+    // The factory's own tank reading, printed raw whether or not it made it into the
+    // snapshot. Until the direction is confirmed against a jug of water this number is
+    // the evidence, and the interpreted one is a claim about it.
+    match vendor::water_level() {
+        Ok(level) => {
+            println!();
+            println!(
+                "  factory tank reading: {:.1} cm, written {} ago{}",
+                level.raw_cm,
+                humanise(level.age),
+                if level.writer_running {
+                    " — gy_wl running, so an old timestamp just means a steady tank"
+                } else {
+                    " — gy_wl is NOT running; this will not update again"
+                }
+            );
+            match level.distance_mm() {
+                Some(mm) => println!(
+                    "    read as {mm:.0} mm from the sensor down to the water — \
+                     assumed, not proven.\n    \
+                     Confirm it: note this number, add a litre, read again. It should FALL."
+                ),
+                None => println!(
+                    "    not converted: the value is configured as a depth, and turning \
+                     that into a\n    distance needs a calibrated tank"
+                ),
+            }
+        }
+        // Absent is the normal case off-device and says nothing interesting.
+        Err(vendor::VendorError::Absent) => {}
+        Err(e) => {
+            println!();
+            println!("  factory tank reading unavailable: {e}");
+        }
+    }
 
     // Called out on its own because it is the one sensor whose absence silently
     // disables a whole rule, and "null" in the JSON does not say why.
@@ -233,6 +359,8 @@ fn read_once() -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "No water level. Without it the water rule cannot run, so nothing will
              ever tell you to top the tank up. Check, in order:
+               - the warning above: `os error 22` is the kernel being older than the
+                 GPIO v2 uAPI rppal needs, not a permissions problem
                - this binary is running on the device, not your workstation
                - the agent's user is in the `gpio` group (`id -nG`)
                - the sensor is on GPIO{trig} (trigger) and GPIO{echo} (echo)",
@@ -399,7 +527,24 @@ fn take_shot(
 /// pins because the LAN is down would be a self-inflicted outage.
 fn beat(heartbeat: &Heartbeat, note: &str) {
     if let Err(e) = heartbeat.touch(note) {
-        tracing::warn!(%e, path = %heartbeat.path().display(), "cannot write the heartbeat");
+        // Once, not every tick. The default path is under `/run`, which wants root, so
+        // an unprivileged agent would otherwise repeat this every sample for months and
+        // bury everything else in the log.
+        //
+        // Harmless in Phase 1 — nothing reads the heartbeat until `garden-guard` runs —
+        // but it inverts at Phase 6. A guard that cannot see a heartbeat concludes the
+        // agent is dead and seizes the pins, so an unwritable path there means the
+        // failsafe fighting a perfectly healthy agent for the PWM lines.
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| {
+            tracing::warn!(
+                %e,
+                path = %heartbeat.path().display(),
+                "cannot write the heartbeat, and will not say so again. Harmless until \
+                 garden-guard runs; before Phase 6, set GARDEN_HEARTBEAT to a writable \
+                 path the guard can also read."
+            );
+        });
     }
 }
 
@@ -440,13 +585,38 @@ async fn run_daemon(
     control: DaemonControl,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sample_interval = Duration::from_secs(sample_seconds.max(5));
-    let component = client.register(name, sample_seconds as i64).await?;
-    tracing::info!(
-        %component,
-        spool = %client.spool_dir().display(),
-        backlog = client.spooled_count(),
-        "registered with the brain"
-    );
+
+    // Registration is retried, not required.
+    //
+    // This was `client.register(...).await?` until 2026-08-31, when the brain happened
+    // to be stopped and the agent exited at start-up with a connection timeout rather
+    // than sampling anything. That contradicts §4's load-bearing rule: the Pi holds its
+    // own schedule and keeps the garden alive whether or not the brain is there. And on
+    // a device with no root, the daemon is started from an `@reboot` crontab — so
+    // "died because a laptop was asleep" means nothing runs until the next reboot.
+    //
+    // Everything downstream already copes: telemetry spools, heartbeats warn, frames
+    // are dropped. Registration was the one place that did not.
+    let mut component = match client.register(name, sample_seconds as i64).await {
+        Ok(component) => {
+            tracing::info!(
+                %component,
+                spool = %client.spool_dir().display(),
+                backlog = client.spooled_count(),
+                "registered with the brain"
+            );
+            Some(component)
+        }
+        Err(e) => {
+            tracing::warn!(
+                %e,
+                spool = %client.spool_dir().display(),
+                "could not register; sampling anyway and retrying each tick. Telemetry \
+                 will spool until the brain answers."
+            );
+            None
+        }
+    };
 
     // The resident schedule. Starts at the default and is replaced by whatever the
     // brain sends; it is never cleared, because "no opinion" must not mean "dark".
@@ -457,9 +627,7 @@ async fn run_daemon(
             "actuator control is ON — this agent is driving the lights and pump, so \
              the factory firmware must already be disabled"
         );
-        match actuators::OwnedActuators::open(garden_hal::GuardMarker::new(
-            &control.guard_marker,
-        )) {
+        match actuators::OwnedActuators::open(garden_hal::GuardMarker::new(&control.guard_marker)) {
             Ok(driver) => Some(driver),
             Err(e) => {
                 // Refusing to start would be worse: telemetry is still useful, and the
@@ -537,7 +705,17 @@ async fn run_daemon(
                 HeartbeatRequest::degraded(AGENT_VERSION, e.to_string())
             }
         };
-        if let Err(e) = client.heartbeat(&component, &status).await {
+        // Catch up on a registration that could not happen at start-up. Cheap: it only
+        // runs while unregistered, and the brain coming back is the common case.
+        if component.is_none()
+            && let Ok(registered) = client.register(name, sample_seconds as i64).await
+        {
+            tracing::info!(component = %registered, "registered with the brain");
+            component = Some(registered);
+        }
+        if let Some(component) = component.as_ref()
+            && let Err(e) = client.heartbeat(component, &status).await
+        {
             tracing::warn!(%e, "heartbeat failed");
         }
 
@@ -607,8 +785,14 @@ mod photo_tests {
         // Part-way up the ramp the lights are on, just not at full. Pinning takes them
         // to the reference and back, so the ramp is not a reason to skip.
         let s = Schedule::DEFAULT;
-        assert!(should_pin(true, &s, 6 * HOUR + 900), "fifteen minutes into dawn");
-        assert!(!should_pin(true, &s, 6 * HOUR - 60), "a minute before it starts");
+        assert!(
+            should_pin(true, &s, 6 * HOUR + 900),
+            "fifteen minutes into dawn"
+        );
+        assert!(
+            !should_pin(true, &s, 6 * HOUR - 60),
+            "a minute before it starts"
+        );
     }
 
     #[test]

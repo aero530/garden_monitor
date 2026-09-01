@@ -147,30 +147,53 @@ mod tests {
     const HOUR: u64 = 3600;
 
     #[test]
-    fn the_lights_run_fourteen_hours_and_then_stop() {
-        assert!(!failsafe_setpoint(0).light.is_off());
-        assert!(!failsafe_setpoint(13 * HOUR).light.is_off());
-        assert!(failsafe_setpoint(15 * HOUR).light.is_off());
+    fn the_lights_follow_the_factory_photoperiod() {
+        // 07:00 to 22:00, per baseline/factory-schedule.md. These tests used to assert
+        // fourteen hours from midnight, which was a guess made before anyone had read
+        // the stock schedule off the device.
+        assert!(failsafe_setpoint(6 * HOUR).light.is_off());
+        assert!(!failsafe_setpoint(12 * HOUR).light.is_off());
+        assert!(!failsafe_setpoint(21 * HOUR).light.is_off());
         assert!(failsafe_setpoint(23 * HOUR).light.is_off());
+        assert!(failsafe_setpoint(0).light.is_off());
     }
 
     #[test]
-    fn the_pump_cycles_fifteen_minutes_in_every_hour() {
+    fn the_lights_come_up_gently_rather_than_snapping_on() {
+        // The factory spends its first hour at half output. This model ramps instead,
+        // which is a different shape with a similar daily total — what matters is that
+        // 07:00 is not a step from nothing to full.
+        let dawn = failsafe_setpoint(7 * HOUR + 5 * 60).light.get();
+        let noon = failsafe_setpoint(12 * HOUR).light.get();
+        assert!(dawn > 0.0, "the lights should be on at all by 07:05");
+        assert!(dawn < noon / 2.0, "{dawn} is not a ramp toward {noon}");
+    }
+
+    #[test]
+    fn the_pump_runs_four_short_cycles_a_day() {
+        // Twenty minutes a day in four runs, matching the factory. The old failsafe ran
+        // fifteen minutes in every hour — six hours a day, eighteen times as much.
+        let minutes_running = (0..86_400)
+            .step_by(60)
+            .filter(|s| !failsafe_setpoint(*s).pump.is_off())
+            .count();
+        assert_eq!(minutes_running, 20, "{minutes_running} minutes of pump a day");
+
         assert!(!failsafe_setpoint(0).pump.is_off());
-        assert!(!failsafe_setpoint(14 * 60).pump.is_off());
-        assert!(failsafe_setpoint(16 * 60).pump.is_off());
-        assert!(failsafe_setpoint(59 * 60).pump.is_off());
-        // ...and starts again on the next hour.
-        assert!(!failsafe_setpoint(HOUR).pump.is_off());
+        assert!(failsafe_setpoint(6 * 60).pump.is_off());
+        assert!(!failsafe_setpoint(6 * HOUR).pump.is_off());
     }
 
     #[test]
     fn the_pump_keeps_running_through_the_dark_hours() {
-        // Roots do not stop needing water when the lights go off. A failsafe that
-        // tied the two together would dry the tower out overnight.
-        let night = failsafe_setpoint(20 * HOUR);
-        assert!(night.light.is_off());
-        assert!(!night.pump.is_off());
+        // Roots do not stop needing water when the lights go off. A failsafe that tied
+        // the two together would dry the tower out overnight — and the factory itself
+        // runs its last cycle at 22:55, an hour after the lights go out.
+        let dark_and_pumping = (0..86_400).step_by(60).any(|s| {
+            let setpoint = failsafe_setpoint(s);
+            setpoint.light.is_off() && !setpoint.pump.is_off()
+        });
+        assert!(dark_and_pumping);
     }
 
     #[test]

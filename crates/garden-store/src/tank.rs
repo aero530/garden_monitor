@@ -407,13 +407,24 @@ mod schedule_tests {
     async fn a_schedule_the_hardware_should_not_run_is_refused_at_the_boundary() {
         // Rejected where a person can see the error, rather than accepted and then
         // silently ignored by every Pi that receives it.
+        //
+        // The example used to be `pump_duty: 1.0`, against a 30% ceiling. That ceiling
+        // is retired — the Studio 2's pump is a switch the factory runs flat out — so
+        // full-on is now a perfectly good schedule and the invalid one has to be
+        // something that is actually invalid.
         let (store, garden) = fixture().await;
-        let greedy = Schedule {
+        let impossible = Schedule {
+            light_hours: 30.0,
+            ..Schedule::DEFAULT
+        };
+        assert!(store.set_schedule(garden, &impossible, t0()).await.is_err());
+        assert_eq!(store.schedule(garden).await.unwrap(), None);
+
+        let full_pump = Schedule {
             pump_duty: 1.0,
             ..Schedule::DEFAULT
         };
-        assert!(store.set_schedule(garden, &greedy, t0()).await.is_err());
-        assert_eq!(store.schedule(garden).await.unwrap(), None);
+        assert!(store.set_schedule(garden, &full_pump, t0()).await.is_ok());
     }
 
     #[tokio::test]

@@ -20,7 +20,7 @@
 //! load. That is invisible to a pump running fifteen minutes an hour, and would not be
 //! acceptable for the lights.
 
-use garden_hal::{Duty, GuardMarker, Setpoint};
+use garden_hal::{Duty, GuardMarker, PumpGuard, Setpoint};
 
 /// One error type for both backends, so the run loop does not need to know which one
 /// it was compiled against. Each variant is constructed by exactly one of them.
@@ -50,15 +50,15 @@ mod imp {
     use rppal::gpio::{Gpio, OutputPin};
     use rppal::pwm::{Channel, Pwm};
 
-    /// PWM carrier frequencies.
+    /// The light's PWM carrier.
     ///
-    /// 8 kHz for the lights: above the audible range, so no coil whine, and fast
-    /// enough that a camera exposure integrates whole cycles instead of catching
-    /// banding. The pump is a DC motor and only needs to beat its own mechanical
-    /// response, so it runs slower — which keeps the software PWM thread's duty
-    /// cycle honest under load.
-    const LIGHT_HZ: f64 = 8_000.0;
-    const PUMP_HZ: f64 = 500.0;
+    /// 20 kHz, because that is what the factory uses — `pfg 18` measured it on the
+    /// device. Above the audible range, so no coil whine, and fast enough that a camera
+    /// exposure integrates whole cycles rather than catching banding. The 8 kHz assumed
+    /// here before came from the Home 3.0/4.0 community map.
+    ///
+    /// There is no pump equivalent: see `set_pump`.
+    const LIGHT_HZ: f64 = 20_000.0;
 
     pub struct PinDriver {
         /// Hardware PWM. GPIO18 is channel 0 on every Pi.
@@ -98,16 +98,18 @@ mod imp {
             Ok(())
         }
 
+        /// The pump is a switch, not a dimmer. Any non-zero duty means on.
+        ///
+        /// The factory drives GPIO24 as a plain digital output — `Pump.py` writes 1 or
+        /// 0 — and thirteen hours of capture never once saw pigpio report a duty cycle
+        /// for it, including through two runs with the pump going. Driving software PWM
+        /// into a stage that may be a relay is a hardware risk for no benefit, since
+        /// there is no evidence the pump can be modulated at all.
         pub fn set_pump(&mut self, duty: Duty) -> Result<(), ActuatorError> {
             if duty.is_off() {
-                self.pump
-                    .clear_pwm()
-                    .map_err(|e| ActuatorError::Gpio(format!("pump stop: {e}")))?;
                 self.pump.set_low();
             } else {
-                self.pump
-                    .set_pwm_frequency(PUMP_HZ, f64::from(duty.get()))
-                    .map_err(|e| ActuatorError::Gpio(format!("pump duty: {e}")))?;
+                self.pump.set_high();
             }
             self.pump_duty = duty;
             Ok(())
@@ -187,6 +189,11 @@ pub struct OwnedActuators {
     /// rather than every fifteen seconds.
     yielded: bool,
     applied: Option<Setpoint>,
+    /// Bounds how long one pump run may last, whatever the schedule asks for.
+    pump_guard: PumpGuard,
+    /// Whether the guard is currently holding the pump off, so the reason is logged
+    /// once rather than every tick for as long as a bad schedule persists.
+    pump_cut: bool,
 }
 
 impl OwnedActuators {
@@ -196,6 +203,8 @@ impl OwnedActuators {
             marker,
             yielded: false,
             applied: None,
+            pump_guard: PumpGuard::new(),
+            pump_cut: false,
         })
     }
 
@@ -222,6 +231,28 @@ impl OwnedActuators {
             self.yielded = false;
             tracing::info!("the failsafe has stood down; resuming control");
         }
+
+        // The on-time ceiling, applied before anything reaches a pin and regardless of
+        // what the schedule asked for. `Schedule::validate` will accept a programme that
+        // pumps for six hours, and on this hardware that is six hours of pumping — see
+        // `garden_hal::PumpGuard`.
+        let now = std::time::Instant::now();
+        let allowed = self.pump_guard.allow(setpoint.pump, now);
+        if allowed.is_off() && !setpoint.pump.is_off() && !self.pump_cut {
+            self.pump_cut = true;
+            tracing::error!(
+                limit_minutes = garden_hal::PUMP_MAX_RUN.as_secs() / 60,
+                "the pump has been running too long and has been forced off. The \
+                 schedule is still asking for it, so this is a bad schedule or a stuck \
+                 pump — it will not run again until the schedule asks for off."
+            );
+        } else if !allowed.is_off() {
+            self.pump_cut = false;
+        }
+        let setpoint = Setpoint {
+            pump: allowed,
+            ..setpoint
+        };
 
         if self.applied == Some(setpoint) {
             return Ok(Applied::Unchanged);

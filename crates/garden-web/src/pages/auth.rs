@@ -7,6 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header::SET_COOKIE};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Form, Router, routing::get, routing::post};
+use garden_store::accounts::ChangePassword;
 use garden_auth::{
     EmailAddress, Membership, SecretToken, check_password_policy, session::DEFAULT_LIFETIME_DAYS,
 };
@@ -19,6 +20,7 @@ pub fn routes() -> Router<AppState> {
         .route("/register", get(register_form).post(register))
         .route("/logout", post(logout))
         .route("/account", get(account))
+        .route("/account/password", post(change_password))
         .route("/account/sign-out-everywhere", post(sign_out_everywhere))
         .route("/invite/{token}", get(invite_landing))
 }
@@ -32,6 +34,9 @@ pub struct LoginForm {
 #[derive(Deserialize, Default)]
 pub struct AuthQuery {
     error: Option<String>,
+    /// Something that went right. Separate from `error` so a password change does not
+    /// announce its own success in red.
+    notice: Option<String>,
     invite: Option<String>,
 }
 
@@ -370,7 +375,11 @@ async fn invite_landing(
     .into_response())
 }
 
-async fn account(State(state): State<AppState>, Auth(actor): Auth) -> Result<Markup, AppError> {
+async fn account(
+    State(state): State<AppState>,
+    Auth(actor): Auth,
+    Query(query): Query<AuthQuery>,
+) -> Result<Markup, AppError> {
     let now = state.now();
     let sessions = state.store.sessions_of(actor.id()).await?;
     let gardens = state.store.gardens_for_user(actor.id()).await?;
@@ -381,6 +390,12 @@ async fn account(State(state): State<AppState>, Auth(actor): Auth) -> Result<Mar
         html! {
             h1 { (actor.user.label()) }
             p.muted { (actor.user.email) }
+            @if let Some(error) = &query.error {
+                p.error { (error) }
+            }
+            @if let Some(notice) = &query.notice {
+                p { span.pill.health-up { (notice) } }
+            }
             @if actor.is_admin() {
                 p { span.pill.health-up { "server administrator" } }
             }
@@ -414,8 +429,75 @@ async fn account(State(state): State<AppState>, Auth(actor): Auth) -> Result<Mar
             form method="post" action="/account/sign-out-everywhere" style="margin-top:1rem" {
                 button.danger type="submit" { "Sign out everywhere" }
             }
+
+            h2 { "Change password" }
+            p.muted.small {
+                "This server has no password-reset email — it is yours, and there is
+                 nobody to ask. Changing it here signs out every other device."
+            }
+            form method="post" action="/account/password" {
+                label { "Current password"
+                    input type="password" name="current" required autocomplete="current-password";
+                }
+                label { "New password"
+                    input type="password" name="new" required autocomplete="new-password";
+                }
+                button type="submit" { "Change password" }
+            }
         },
     ))
+}
+
+#[derive(Deserialize)]
+pub struct PasswordForm {
+    current: String,
+    new: String,
+}
+
+/// Change your own password.
+///
+/// The user id comes from the session rather than the form, so there is nothing to
+/// tamper with: you can only ever change the password of whoever is signed in.
+async fn change_password(
+    State(state): State<AppState>,
+    Auth(actor): Auth,
+    headers: HeaderMap,
+    Form(form): Form<PasswordForm>,
+) -> Result<Response, AppError> {
+    // The caller's own session, so it can be spared while every other one is closed.
+    let token = crate::app::read_cookie(&headers, state.config.cookie_name())
+        .and_then(SecretToken::from_client)
+        .ok_or(AppError::Unauthorized)?;
+
+    let outcome = state
+        .store
+        .change_password(actor.id(), &form.current, &form.new, &token)
+        .await?;
+
+    Ok(match outcome {
+        ChangePassword::Changed {
+            other_sessions_closed,
+        } => {
+            tracing::info!(
+                user = %actor.id(),
+                other_sessions_closed,
+                "password changed"
+            );
+            let message = match other_sessions_closed {
+                0 => "Password changed".to_string(),
+                1 => "Password changed, and 1 other device was signed out".to_string(),
+                n => format!("Password changed, and {n} other devices were signed out"),
+            };
+            Redirect::to(&format!("/account?notice={}", message.replace(' ', "+")))
+                .into_response()
+        }
+        // Deliberately the same wording whichever way it failed at the front, since the
+        // store already refuses to say whether the current password was right.
+        ChangePassword::WrongPassword => {
+            redirect_with_error("/account", "That is not your current password")
+        }
+        ChangePassword::TooWeak(weak) => redirect_with_error("/account", &weak.to_string()),
+    })
 }
 
 async fn sign_out_everywhere(
