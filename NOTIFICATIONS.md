@@ -251,9 +251,10 @@ because auto-verification runs both ways: doing the work moves a sensor, and the
 completes itself without a tap. Nearly everything this system asks of you needs you
 standing at the garden anyway.
 
-`GARDEN_BASE_URL` therefore stays a LAN address, and `GARDEN_INSECURE_COOKIES` stays
-set — the brain is plain HTTP on the LAN, and a `__Host-` cookie over plain HTTP fails
-in a way that looks like a wrong password.
+`GARDEN_BASE_URL` therefore stays a LAN address. Cookie security follows it
+automatically — over http:// the server issues a plain `garden_session` cookie, because
+a `Secure` one would be dropped by the browser and the login page would simply come
+back.
 
 ---
 

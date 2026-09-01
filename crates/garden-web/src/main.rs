@@ -34,10 +34,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database = std::env::var("GARDEN_DB").unwrap_or_else(|_| "sqlite://garden.db".into());
     let bind = std::env::var("GARDEN_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
     let base_url = std::env::var("GARDEN_BASE_URL").unwrap_or_else(|_| format!("http://{bind}"));
-    // Defaults to on. Turning it off has to be the explicit choice, because a
-    // `__Host-` cookie over plain HTTP fails in a way that looks like a broken login
-    // rather than a misconfiguration.
-    let secure_cookies = std::env::var("GARDEN_INSECURE_COOKIES").is_err();
+    // Derived from the scheme, not defaulted to on.
+    //
+    // This used to be "secure unless GARDEN_INSECURE_COOKIES is set", which produced a
+    // `__Host-garden_session=…; Secure` cookie over plain HTTP — a combination every
+    // browser rejects twice over, since `Secure` requires HTTPS and the `__Host-`
+    // prefix requires `Secure`. The cookie was dropped silently, the session never
+    // persisted, and registering or signing in bounced straight back to the login page
+    // looking exactly like a wrong password. It cost an evening.
+    //
+    // A `Secure` cookie over `http://` cannot work, so there is nothing to configure:
+    // the scheme decides. `https://` here covers the reverse-proxy case too, where the
+    // app speaks plain HTTP to a terminator that speaks TLS to the browser — what
+    // matters is the scheme the *browser* used, which is what `base_url` records.
+    let secure_cookies = app::secure_cookies_for(
+        &base_url,
+        std::env::var("GARDEN_INSECURE_COOKIES").is_ok(),
+    );
     let agent_token = std::env::var("GARDEN_AGENT_TOKEN")
         .ok()
         .filter(|t| !t.is_empty());
@@ -46,7 +59,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("GARDEN_AGENT_TOKEN is unset — the agent API is closed");
     }
     if !secure_cookies {
-        tracing::warn!("GARDEN_INSECURE_COOKIES is set — cookies will not be marked Secure");
+        tracing::info!(
+            %base_url,
+            "session cookies are not marked Secure, because this base URL is not HTTPS. \
+             Correct for a LAN deployment; if you expected TLS, GARDEN_BASE_URL is wrong."
+        );
     }
 
     // Frame bytes live on disk, not in SQLite, so backups stay small.

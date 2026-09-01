@@ -34,6 +34,24 @@ impl Default for Config {
     }
 }
 
+/// Whether session cookies may be marked `Secure`, given the URL browsers actually use.
+///
+/// Not a preference — a fact about the scheme. A `Secure` cookie is only accepted over
+/// HTTPS, and the `__Host-` prefix additionally *requires* `Secure`, so issuing either
+/// over `http://` produces a cookie every browser silently discards. The session then
+/// never persists, and registering or signing in bounces back to the login page looking
+/// exactly like a wrong password.
+///
+/// `https://` also covers the reverse-proxy case, where this process speaks plain HTTP
+/// to a terminator that speaks TLS to the browser: what matters is the scheme the
+/// *browser* used, and `base_url` is where that is recorded.
+///
+/// `forced_insecure` (`GARDEN_INSECURE_COOKIES`) can only ever turn this off. There is
+/// nothing to be gained from letting it turn cookies on where they cannot work.
+pub fn secure_cookies_for(base_url: &str, forced_insecure: bool) -> bool {
+    !forced_insecure && base_url.trim_start().starts_with("https://")
+}
+
 impl Config {
     pub fn cookie_name(&self) -> &'static str {
         if self.secure_cookies {
@@ -193,6 +211,62 @@ pub fn user_agent(headers: &HeaderMap) -> Option<String> {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+
+    /// The cookie a browser would actually be sent, end to end.
+    fn issued_cookie(base_url: &str, forced_insecure: bool) -> String {
+        let config = Config {
+            secure_cookies: secure_cookies_for(base_url, forced_insecure),
+            base_url: base_url.into(),
+            agent_token: None,
+        };
+        set_cookie(config.cookie_name(), "tok", 60, config.secure_cookies)
+    }
+
+    #[test]
+    fn a_plain_http_deployment_never_issues_a_cookie_the_browser_will_drop() {
+        // The bug this exists to prevent, and it cost an evening. `__Host-` requires
+        // `Secure`, and `Secure` requires HTTPS, so either one over http:// produces a
+        // cookie every browser silently discards — after which registering succeeds,
+        // the redirect arrives with no session, and the login page comes back looking
+        // exactly like a wrong password.
+        for base in [
+            "http://192.168.86.10:8080",
+            "http://garden-brain.local:8080",
+            "http://localhost:8080",
+        ] {
+            let cookie = issued_cookie(base, false);
+            assert!(!cookie.contains("Secure"), "{base} issued: {cookie}");
+            assert!(!cookie.contains("__Host-"), "{base} issued: {cookie}");
+        }
+    }
+
+    #[test]
+    fn an_https_deployment_gets_the_hardened_cookie() {
+        let cookie = issued_cookie("https://garden.example.com", false);
+        assert!(cookie.contains("__Host-garden_session"), "{cookie}");
+        assert!(cookie.contains("Secure"), "{cookie}");
+    }
+
+    #[test]
+    fn the_override_can_only_weaken_never_strengthen() {
+        // `GARDEN_INSECURE_COOKIES` exists for a TLS deployment someone wants to debug.
+        // It must not be able to turn cookies *on* where they cannot work, or the
+        // footgun comes back through the other door.
+        assert!(!secure_cookies_for("https://garden.example.com", true));
+        assert!(!secure_cookies_for("http://192.168.86.10:8080", true));
+        assert!(!secure_cookies_for("http://192.168.86.10:8080", false));
+        assert!(secure_cookies_for("https://garden.example.com", false));
+    }
+
+    #[test]
+    fn a_scheme_that_is_not_https_is_not_treated_as_https() {
+        // Nothing here should be fooled by a hostname that merely mentions it.
+        assert!(!secure_cookies_for("http://https.example.com", false));
+        assert!(!secure_cookies_for("garden.example.com", false));
+        assert!(!secure_cookies_for("", false));
+        // Leading whitespace from a hand-edited env file is not a scheme change.
+        assert!(secure_cookies_for("  https://garden.example.com", false));
+    }
 
     fn headers_with(cookie: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();

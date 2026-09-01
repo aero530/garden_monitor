@@ -634,9 +634,10 @@ base-url: "https://ntfy.example.com"
 sudo systemctl restart garden-ntfy
 ```
 
-`GARDEN_BASE_URL` stays a **LAN** address, and `GARDEN_INSECURE_COOKIES` stays set. The
-brain is plain HTTP on the LAN, and a `__Host-` cookie over plain HTTP fails in a way
-that looks like a wrong password rather than a misconfiguration.
+`GARDEN_BASE_URL` stays a **LAN** address. You do not need `GARDEN_INSECURE_COOKIES`:
+the server derives cookie security from that URL, because a `Secure` or `__Host-`
+cookie over plain HTTP is one every browser silently drops — and the resulting login
+loop looks exactly like a wrong password.
 
 ### Firewall
 
@@ -903,8 +904,8 @@ not `chmod 777`.
 
 **Web UI loads but sign-in bounces back to the login page.** Session cookies use the
 `__Host-` prefix, which browsers refuse over plain HTTP. The brain is deliberately plain
-HTTP on the LAN, so `GARDEN_INSECURE_COOKIES=1` is the expected setting here rather than
-a workaround.
+HTTP on the LAN. Nothing to set: cookie security follows GARDEN_BASE_URL, so an
+http:// base URL issues a plain `garden_session` cookie the browser accepts.
 
 **Push works from `curl` but not from the brain.** The brain cannot reach ntfy:
 
