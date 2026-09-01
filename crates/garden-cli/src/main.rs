@@ -48,6 +48,10 @@ enum Command {
     #[command(subcommand)]
     Vision(VisionCommand),
 
+    /// Accounts: list them, and reset a password nobody remembers.
+    #[command(subcommand)]
+    Account(AccountCommand),
+
     /// Record something you did to the tank.
     ///
     /// The rule engine re-derives "overdue for a refresh" from the last recorded
@@ -205,6 +209,49 @@ enum ScheduleCommand {
     },
 }
 
+/// Account administration, for the situations a web form cannot reach.
+///
+/// This server sends no password-reset email and closes registration once it has an
+/// owner, both deliberately. The consequence is that a forgotten password would
+/// otherwise lock you out of your own database permanently. Root on this machine is the
+/// authorisation — the same bargain as `passwd`.
+#[derive(Subcommand)]
+enum AccountCommand {
+    /// Who has an account on this server.
+    List,
+
+    /// Set a password without knowing the old one.
+    ///
+    /// Signs out every session for that account, including any of yours.
+    ///
+    ///   garden-cli account reset --email you@example.com
+    Reset {
+        #[arg(long)]
+        email: String,
+        /// The new password. Omit it and one is generated and printed, which is
+        /// better than most things a person invents under pressure.
+        #[arg(long)]
+        password: Option<String>,
+        /// Also make this account the server administrator.
+        #[arg(long)]
+        admin: bool,
+    },
+
+    /// Give an account access to a garden.
+    ///
+    /// Needed when a database arrives by migration with a garden whose owner no longer
+    /// has an account — the garden is there, and nobody can see it.
+    Grant {
+        #[arg(long)]
+        email: String,
+        #[arg(long)]
+        garden: String,
+        /// `owner`, `tender`, or `viewer`.
+        #[arg(long, default_value = "owner")]
+        role: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum LogCommand {
     /// Water added, in litres.
@@ -323,6 +370,7 @@ async fn run() -> Fallible {
 
     match cli.command {
         Command::Gardens => gardens(&store).await,
+        Command::Account(command) => account(&store, command).await,
         Command::Tank(TankCommand::Show { garden }) => tank_show(&store, &garden).await,
         Command::Tank(TankCommand::Calibrate { .. }) => unreachable!("handled above"),
         Command::Vision(command) => vision_online(&store, command).await,
@@ -356,6 +404,115 @@ async fn gardens(store: &Store) -> Fallible {
             garden.model.to_string(),
             if calibrated { "on" } else { "off" }
         );
+    }
+    Ok(())
+}
+
+// --- Accounts -------------------------------------------------------------------------
+
+/// A password worth the trouble of typing once.
+///
+/// Four words from a small list beats a random string here: this gets read off a
+/// terminal and typed into a phone, and a password nobody can transcribe gets replaced
+/// with `garden123` within the hour. Length carries the strength.
+fn generated_password() -> String {
+    const WORDS: &[&str] = &[
+        "basil", "canopy", "cedar", "clover", "compost", "fennel", "harvest", "lantern",
+        "meadow", "nettle", "orchard", "pebble", "quartz", "rhubarb", "sorrel", "thistle",
+        "trellis", "vervain", "willow", "yarrow",
+    ];
+    // Not a cryptographic source, and it does not need to be: this is a password you
+    // change at the first opportunity, chosen on a machine you already have root on.
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut state = seed as u64 | 1;
+    let mut pick = || {
+        // xorshift64, so the four words are not consecutive nanoseconds apart.
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        WORDS[(state % WORDS.len() as u64) as usize]
+    };
+    format!("{}-{}-{}-{}", pick(), pick(), pick(), pick())
+}
+
+async fn account(store: &Store, command: AccountCommand) -> Fallible {
+    match command {
+        AccountCommand::List => {
+            let users = store.all_users().await?;
+            if users.is_empty() {
+                println!("no accounts — the first to register at the web UI becomes administrator");
+                return Ok(());
+            }
+            for user in users {
+                println!(
+                    "{:<34} {:<20} {}",
+                    user.email.as_str(),
+                    user.display_name,
+                    if user.is_admin { "administrator" } else { "" }
+                );
+            }
+        }
+
+        AccountCommand::Reset {
+            email,
+            password,
+            admin,
+        } => {
+            let parsed = garden_auth::EmailAddress::parse(&email)
+                .map_err(|e| format!("{email:?} is not an email address: {e}"))?;
+            let user = store
+                .find_user_by_email(&parsed)
+                .await?
+                .ok_or_else(|| format!("no account for {email} — try `garden-cli account list`"))?;
+
+            let generated = password.is_none();
+            let new = password.unwrap_or_else(generated_password);
+            store.reset_password(user.id, &new).await?;
+            if admin {
+                store.make_admin(user.id).await?;
+            }
+
+            println!("password reset for {}", user.email);
+            if generated {
+                println!("\n    {new}\n");
+                println!("Change it once you are in: Account → Change password.");
+            }
+            println!("Every session for that account has been signed out.");
+        }
+
+        AccountCommand::Grant {
+            email,
+            garden,
+            role,
+        } => {
+            let parsed = garden_auth::EmailAddress::parse(&email)
+                .map_err(|e| format!("{email:?} is not an email address: {e}"))?;
+            let user = store
+                .find_user_by_email(&parsed)
+                .await?
+                .ok_or_else(|| format!("no account for {email}"))?;
+            let garden_id = parse_garden(&garden)?;
+            let parsed_role: garden_auth::Role = role
+                .parse()
+                .map_err(|_| format!("{role:?} is not a role — owner, tender, or viewer"))?;
+
+            // `granted` rather than `founding_owner`: this is an administrator handing
+            // access over after the fact, and recording it as the founding grant would
+            // rewrite who created the garden.
+            store
+                .grant_membership(&garden_auth::Membership::granted(
+                    garden_id,
+                    user.id,
+                    parsed_role,
+                    user.id,
+                    Timestamp::now(),
+                ))
+                .await?;
+            println!("{} can now access {garden} as {role}", user.email);
+        }
     }
     Ok(())
 }

@@ -112,7 +112,7 @@ cat <<'DONE'
   1. Edit /etc/garden/ntfy-server.yml — set base-url to the PUBLIC name your
      phone will use (the one Caddy holds a certificate for), then:
 
-       sudo systemctl enable --now garden-ntfy
+       sudo systemctl start garden-ntfy
        sudo podman exec -it systemd-garden-ntfy ntfy user add --role=admin garden
        sudo podman exec -it systemd-garden-ntfy ntfy token add garden
 
@@ -124,13 +124,13 @@ cat <<'DONE'
 
      Then:
 
-       sudo systemctl enable --now garden-web
+       sudo systemctl start garden-web
        sudo systemctl enable --now garden-backup.timer
 
   3. Edit /etc/garden/Caddyfile — hostname and email — then, once your DNS name
      resolves to this house and the router forwards 443:
 
-       sudo systemctl enable --now garden-caddy
+       sudo systemctl start garden-caddy
        journalctl -u garden-caddy | grep -i certificate
 
      Leave this until last. Caddy cannot obtain a certificate before the name

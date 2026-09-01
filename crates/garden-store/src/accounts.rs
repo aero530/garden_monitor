@@ -228,6 +228,60 @@ impl Store {
         })
     }
 
+    /// Every account on this server, oldest first.
+    pub async fn all_users(&self) -> Result<Vec<User>> {
+        let rows = sqlx::query("SELECT * FROM users ORDER BY created_at, id")
+            .fetch_all(&self.db)
+            .await?;
+        rows.iter().map(user_from_row).collect()
+    }
+
+    /// Set a password without knowing the old one. **Administrative.**
+    ///
+    /// [`Store::change_password`] deliberately demands the current password, because a
+    /// borrowed session must not become a permanent takeover. This does not, so the
+    /// authorisation has to come from somewhere else — and it does: reaching this
+    /// requires the database file, which requires root on the machine it lives on. The
+    /// same posture as `passwd` on any Unix, and the same reason it is safe.
+    ///
+    /// It exists because a self-hosted server has no way to email you a reset link, no
+    /// support desk, and — once the first account is created — a closed registration
+    /// form. Without this, a forgotten password means the database is unreachable
+    /// forever, which is a spectacular way to lose a season of history.
+    ///
+    /// Every session is closed, including any the person doing the reset holds. If you
+    /// are resetting a password you have lost, nobody should still be signed in as you.
+    pub async fn reset_password(&self, user: UserId, new: &str) -> Result<()> {
+        check_password_policy(new).map_err(|weak| StoreError::Corrupt(weak.to_string()))?;
+        let digest = hash_password(new)
+            .map_err(|e| StoreError::Corrupt(format!("password hashing: {e}")))?;
+
+        let updated = sqlx::query("UPDATE users SET password_digest = ?1 WHERE id = ?2")
+            .bind(digest.as_str())
+            .bind(user.to_string())
+            .execute(&self.db)
+            .await?
+            .rows_affected();
+        if updated == 0 {
+            return Err(StoreError::Corrupt(format!("no account {user}")));
+        }
+
+        self.close_all_sessions(user).await?;
+        Ok(())
+    }
+
+    /// Make an account the server administrator.
+    ///
+    /// The first registration takes this automatically, but a database can outlive the
+    /// person who made it — or arrive by migration with its admin flag on someone else.
+    pub async fn make_admin(&self, user: UserId) -> Result<()> {
+        sqlx::query("UPDATE users SET is_admin = 1 WHERE id = ?1")
+            .bind(user.to_string())
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
     // --- Sessions ---------------------------------------------------------------
 
     pub async fn open_session(

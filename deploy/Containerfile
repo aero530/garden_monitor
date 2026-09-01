@@ -23,7 +23,12 @@ COPY . .
 
 # --locked so the image is built from the committed Cargo.lock and a dependency
 # cannot quietly change between your machine and the server.
-RUN cargo build --release --locked -p garden-web
+#
+# `garden-cli` ships too. It talks to the database directly rather than through the
+# web API — which is what makes `replay` possible at all — so it has to run where the
+# database is, and that is inside this container. Without it, checking which gardens
+# exist or calibrating a tank means installing a Rust toolchain on the server.
+RUN cargo build --release --locked -p garden-web -p garden-cli
 
 # ---------------------------------------------------------------------------
 # Stage 2 — runtime
@@ -37,6 +42,9 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /src/target/release/garden-web /usr/local/bin/garden-web
+# Reached with `podman exec`, and it picks up GARDEN_DB from the environment set
+# below — so `garden-cli gardens` works with no arguments.
+COPY --from=build /src/target/release/garden-cli /usr/local/bin/garden-cli
 
 # Matches the uid the Quadlet unit runs as and the owner of /var/lib/garden on the
 # host. Numeric, not a name, so it stays correct however the image is inspected.

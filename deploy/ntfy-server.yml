@@ -4,7 +4,13 @@
 #
 # Change base-url before starting. Everything else is sensible as-is.
 
-# How your PHONE reaches this server — not how the brain reaches it.
+# How your PHONE reaches THIS server. Not how the brain reaches it, and not where the
+# Done buttons point.
+#
+# Worth being precise, because an older comment here claimed ntfy stamps this into the
+# action buttons and it does not: those URLs are built by the brain from
+# `GARDEN_BASE_URL` and travel inside the message. This value is ntfy's own idea of its
+# address — its web app, attachment links, and what the phone app is pointed at.
 #
 # The public name Caddy holds a certificate for, and it must resolve from mobile data
 # rather than only from the house: ntfy being reachable from anywhere is the whole

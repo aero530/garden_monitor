@@ -311,6 +311,11 @@ Three consequences that will save you time:
    `daemon-reload`.
 3. **`daemon-reload` is not optional.** Adding a `.container` file does nothing until
    you reload. This is the number one reason a new container "does not exist".
+4. **`start`, never `enable`.** The generated unit lives in `/run/systemd/generator`,
+   and `systemctl enable` refuses it: *"Unit … is transient or generated"*. Boot
+   start-up comes from the `[Install] WantedBy=` inside the `.container` file, which the
+   generator acts on for you. Only real unit files — `garden-backup.timer` — get
+   `enable`.
 
 Check what Quadlet made of your file *without* starting anything:
 
@@ -465,7 +470,7 @@ every Done button does nothing. It is the public name Caddy holds a certificate 
 
 ```sh
 sudo systemctl daemon-reload
-sudo systemctl enable --now garden-ntfy
+sudo systemctl start garden-ntfy
 curl -s localhost:8090/v1/health       # {"healthy":true}
 ```
 
@@ -513,7 +518,7 @@ Then:
 cd ~/garden
 sudo install -m 0644 deploy/quadlet/garden-web.container /etc/containers/systemd/
 sudo systemctl daemon-reload
-sudo systemctl enable --now garden-web
+sudo systemctl start garden-web
 journalctl -u garden-web -f
 ```
 
@@ -537,7 +542,7 @@ without it.
 ```sh
 sudo install -m 0644 deploy/quadlet/garden-ollama.container /etc/containers/systemd/
 sudo systemctl daemon-reload
-sudo systemctl enable --now garden-ollama
+sudo systemctl start garden-ollama
 sudo podman exec -it systemd-garden-ollama ollama pull qwen2.5vl:7b
 ```
 
@@ -698,8 +703,29 @@ the Pi has it baked into `/etc/garden/edge.env`, and a new one means telemetry a
 for a garden that does not exist.
 
 Registration will be closed on the migrated database, because it already has an owner.
-Sign in with the account you created on the workstation; if that password has become
-vague, change it afterwards at **Account → Change password**.
+Sign in with the account you created on the workstation.
+
+### Locked out
+
+There is no reset email and no support desk, so the escape hatch is root on this
+machine — the same bargain as `passwd`:
+
+```sh
+sudo podman exec -it systemd-garden-web garden-cli account list
+sudo podman exec -it systemd-garden-web garden-cli account reset --email you@example.com
+```
+
+That prints a generated password, signs out every session for the account, and leaves
+you to change it at **Account → Change password** once you are in. Pass `--password` to
+choose your own, and `--admin` to make the account the server administrator as well.
+
+If the migrated garden shows up for nobody — its owner had an account that did not come
+across — grant it:
+
+```sh
+sudo podman exec -it systemd-garden-web garden-cli account grant \
+  --email you@example.com --garden 4ba32a3a-…
+```
 
 ---
 
