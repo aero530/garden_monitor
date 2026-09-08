@@ -13,8 +13,8 @@
 #   2. Port 443 forwarded to this VM at the router. **Only 443.** If you find yourself
 #      forwarding 8080 you have exposed the brain, which is the thing this arrangement
 #      exists to avoid.
-#   3. Port 80 reachable *during certificate issue* — Let's Encrypt's HTTP challenge
-#      needs it. Caddy renews unattended afterwards.
+#   3. Either port 80 or port 443 reachable from the internet, for the certificate.
+#      See "If your ISP blocks a port" below — 80 is avoidable.
 
 {
 	# Where expiry warnings go. Let's Encrypt is a certificate authority rather than a
@@ -22,6 +22,46 @@
 	# party sees a single notification.
 	email you@example.com
 }
+
+# --- If your ISP blocks a port ----------------------------------------------------
+#
+# The certificate authority always connects to 80 or 443. Those numbers are fixed by
+# the challenge types and cannot be moved — but which one gets used can.
+#
+# **Port 80 blocked, 443 open.** Nothing to do: Caddy falls back to TLS-ALPN-01, which
+# runs entirely over 443. Uncomment the block below only to stop it wasting time on a
+# challenge that cannot succeed, and to make the choice deliberate rather than lucky.
+#
+#     ntfy.example.com {
+#         tls {
+#             issuer acme {
+#                 disable_http_challenge
+#             }
+#         }
+#         ...
+#     }
+#
+# **Both blocked, or you want the phone on a non-standard port.** Then no inbound
+# challenge can reach you and DNS-01 is the only route: Caddy proves ownership by
+# writing a TXT record instead. That needs an image built with the DreamHost plugin,
+# because the stock `caddy:2-alpine` ships no DNS providers —
+#
+#     xcaddy build --with github.com/caddy-dns/dreamhost
+#
+# — and the site block then becomes:
+#
+#     ntfy.example.com:8443 {
+#         tls {
+#             dns dreamhost {env.DREAMHOST_KEY}
+#         }
+#         ...
+#     }
+#
+# With DNS-01 the listening port is free, because nothing external has to reach it for
+# the certificate. Put the same port in ntfy's `base-url` and in the phone app — the
+# ntfy client is happy with any port, it is only the CA that is fussy.
+#
+# ----------------------------------------------------------------------------------
 
 ntfy.example.com {
 	# Caddy obtains and renews the certificate by itself; there is no certbot, no cron

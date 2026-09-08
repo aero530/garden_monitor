@@ -90,17 +90,15 @@ say "Reloading systemd"
 systemctl daemon-reload
 
 say "Opening the firewall"
-# The brain is LAN-only; Caddy holds the only internet-facing port and fronts only
-# ntfy. 8090 is deliberately absent — ntfy is not published to the host at all, and
-# Caddy reaches it by container name. See DESIGN.md §10.
+# Internal zone only, both of them. This is a LAN deployment until you decide
+# otherwise: the phone gets notifications on wifi and nothing is reachable from the
+# internet. `garden-caddy` and its public ports are a later, deliberate step —
+# DEPLOYMENT.md Part 7, and DESIGN.md §10 for why only ntfy ever goes out there.
 if systemctl is-active --quiet firewalld; then
-  firewall-cmd --permanent --zone=internal --add-port=8080/tcp >/dev/null
-  firewall-cmd --permanent --zone=public --add-service=https >/dev/null
-  # HTTP is needed only while Let's Encrypt answers its challenge; Caddy redirects
-  # everything else to HTTPS.
-  firewall-cmd --permanent --zone=public --add-service=http >/dev/null
+  firewall-cmd --permanent --zone=internal --add-port=8080/tcp >/dev/null  # the brain
+  firewall-cmd --permanent --zone=internal --add-port=8090/tcp >/dev/null  # ntfy
   firewall-cmd --reload >/dev/null
-  echo "8080 internal (the brain); 443 and 80 public (Caddy only)"
+  echo "8080 and 8090 open on the internal zone; nothing public"
 else
   echo "firewalld is not running — skipped"
 fi
@@ -108,9 +106,11 @@ fi
 cat <<'DONE'
 
 ==> Installed. Three things left, all of which need your input:
+     (this gets you a LAN deployment — Caddy and DNS come later, if at all)
 
-  1. Edit /etc/garden/ntfy-server.yml — set base-url to the PUBLIC name your
-     phone will use (the one Caddy holds a certificate for), then:
+  1. Edit /etc/garden/ntfy-server.yml — set base-url to this VM's LAN address
+     and port, e.g. http://192.168.1.20:8090. That is how the PHONE reaches it,
+     so `localhost` is always wrong. Then:
 
        sudo systemctl start garden-ntfy
        sudo podman exec -it systemd-garden-ntfy ntfy user add --role=admin garden
@@ -127,14 +127,16 @@ cat <<'DONE'
        sudo systemctl start garden-web
        sudo systemctl enable --now garden-backup.timer
 
-  3. Edit /etc/garden/Caddyfile — hostname and email — then, once your DNS name
-     resolves to this house and the router forwards 443:
+  3. Subscribe the phone. ntfy app -> Settings -> Default server -> the same LAN
+     URL, sign in as `phone`, subscribe to an unguessable topic, and paste that
+     topic into Account -> Notification settings in the web UI.
 
-       sudo systemctl start garden-caddy
-       journalctl -u garden-caddy | grep -i certificate
+  That is a working LAN deployment: notifications arrive whenever the phone is on
+  your wifi, and nothing is reachable from the internet.
 
-     Leave this until last. Caddy cannot obtain a certificate before the name
-     resolves, and Let's Encrypt rate-limits repeated failures.
+  For notifications away from home, `garden-caddy` fronts ntfy with a real
+  certificate — DEPLOYMENT.md Part 7. It needs a DNS name and a forwarded port,
+  so it is a deliberate later step rather than part of this install.
 
   Watch it come up with:  journalctl -u garden-web -f
   The first account to register at the web UI becomes the administrator —

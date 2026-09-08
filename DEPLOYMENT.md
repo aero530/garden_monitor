@@ -622,8 +622,25 @@ journalctl -u garden-caddy | grep -i certificate
 ```
 
 Caddy obtains and renews the certificate itself — no certbot, no cron job to forget in
-ninety days. Port 80 needs to be reachable during issue for the ACME challenge; after
-that only 443 matters.
+ninety days.
+
+### If your ISP blocks a port
+
+The certificate authority always connects to **80 or 443** — those are fixed by the
+challenge types. Your phone can use any port; the CA cannot.
+
+| | |
+|---|---|
+| 80 blocked, 443 open | Nothing to do. Caddy uses TLS-ALPN-01 over 443, stock image, no plugin |
+| Both blocked, or you want a non-standard port | DNS-01 is the only route: a custom Caddy image with the DreamHost plugin. `deploy/Caddyfile` has the config commented in |
+
+Worth testing before you get here, from a phone on mobile data rather than from inside
+the house — a router without NAT hairpin will fail a test from the LAN whatever the ISP
+is doing:
+
+```sh
+sudo python3 -m http.server 80        # then hit http://<public-ip>/ from mobile data
+```
 
 Then point ntfy's `base-url` at the public name and restart it:
 

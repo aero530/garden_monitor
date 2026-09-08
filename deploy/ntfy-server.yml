@@ -12,13 +12,16 @@
 # `GARDEN_BASE_URL` and travel inside the message. This value is ntfy's own idea of its
 # address — its web app, attachment links, and what the phone app is pointed at.
 #
-# The public name Caddy holds a certificate for, and it must resolve from mobile data
-# rather than only from the house: ntfy being reachable from anywhere is the whole
-# reason it is exposed while the brain is not. See DESIGN.md §10.
-base-url: "https://ntfy.example.com"
+# **LAN address and port, for a local-only deployment.** Notifications arrive whenever
+# the phone is on your wifi, and nothing is exposed to the internet. Start here.
+#
+# When you put a proxy in front of it — `garden-caddy` on this VM, or one you already
+# run elsewhere — change this to the public name that holds the certificate and set
+# `behind-proxy: true` below. It must then resolve from mobile data rather than only
+# from the house, which is the entire point of exposing ntfy while the brain stays
+# private. See DESIGN.md §10.
+base-url: "http://192.168.86.10:8090"
 
-# Container-internal only. Caddy reaches this over the podman network; nothing
-# publishes it to the host and nothing forwards it at the router.
 listen-http: ":8090"
 
 cache-file: "/var/cache/ntfy/cache.db"
@@ -38,4 +41,12 @@ keepalive-interval: "45s"
 # Nothing here sends attachments, and accepting them is a way to fill the disk.
 attachment-cache-dir: ""
 
-behind-proxy: true
+# Off, because nothing is proxying this yet — and it is not a harmless default.
+#
+# `behind-proxy: true` tells ntfy to believe the `X-Forwarded-For` header when deciding
+# who a request came from. Correct behind a proxy you control; wrong when clients
+# connect directly, because anyone on the LAN could then claim any address and defeat
+# per-IP rate limiting by inventing a new one per request.
+#
+# Turn it on at the same moment you put a proxy in front, not before.
+behind-proxy: false

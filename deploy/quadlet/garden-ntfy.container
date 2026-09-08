@@ -11,9 +11,23 @@ Wants=network-online.target
 [Container]
 Image=docker.io/binwiederhier/ntfy:v2
 Exec=serve
-# Deliberately not published to the host. Caddy reaches it by container name over the
-# shared network and owns the only port the router forwards, so there is exactly one
-# internet-facing process and it is not this one. See DESIGN.md §10.
+# Published on the LAN, because something has to be able to reach it.
+#
+# Three deployments, and this line is right for two of them:
+#
+#   1. **LAN only** (the default, and where you start): the phone talks to this
+#      directly on wifi. Notifications arrive at home and nothing is exposed.
+#   2. **Fronted by a reverse proxy on another host** — one that already owns 80 and
+#      443 for your other services. Point a vhost at this address and drop
+#      `garden-caddy` entirely.
+#   3. **Fronted by `garden-caddy` on this VM**: Caddy reaches ntfy by container name
+#      over the shared network, so this line is redundant. Harmless, or comment it out
+#      to keep the surface at exactly one port.
+#
+# Bound to the LAN address rather than 0.0.0.0. On a single-homed VM those are the same
+# thing, and they stop being so the moment you add a second network — at which point
+# the narrower one is the one you wish you had written. Adjust to your address.
+PublishPort=192.168.86.10:8090:8090
 Volume=/etc/garden/ntfy-server.yml:/etc/ntfy/server.yml:Z,ro
 Volume=/var/lib/garden-ntfy:/var/lib/ntfy:Z
 Volume=/var/cache/garden-ntfy:/var/cache/ntfy:Z
