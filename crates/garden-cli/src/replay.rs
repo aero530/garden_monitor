@@ -30,6 +30,18 @@ pub struct Day {
     pub had_telemetry: bool,
 }
 
+/// One outstanding task, flattened for printing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Outstanding {
+    pub kind: TaskKind,
+    pub key: String,
+    pub target: String,
+    pub severity: garden_core::Severity,
+    pub rationale: String,
+    /// Days until the late edge of the due window. Negative means overdue.
+    pub due_in_days: f64,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Summary {
     pub days: Vec<Day>,
@@ -38,6 +50,19 @@ pub struct Summary {
     /// Days with no sensor reading. Reported because a replay over a gap is mostly
     /// measuring the gap.
     pub blind_days: usize,
+    /// What the rules still say on the last replayed day.
+    ///
+    /// The number the rest of this summary does not give you. `totals` counts *raise
+    /// events* — a task that appeared on day 0 and never resolved counts once, and one
+    /// that flapped six times counts six — so a large total is equally consistent with
+    /// a garden that needs a lot of work and one that needs none. Comparing it against
+    /// the `tasks` table, which holds only what is outstanding, is comparing a
+    /// stopwatch to a thermometer.
+    pub outstanding_now: Vec<Outstanding>,
+    /// Rules that could not run on the last day, already explained.
+    pub suppressed_now: Vec<String>,
+    /// Capabilities the last day's snapshot actually had.
+    pub capabilities_now: Vec<&'static str>,
 }
 
 impl Summary {
@@ -99,6 +124,24 @@ pub async fn run(
             outstanding: evaluation.tasks.len(),
             had_telemetry,
         });
+
+        // Overwritten each step, so what survives is the last day evaluated — the one
+        // that should agree with the `tasks` table and the web UI.
+        summary.outstanding_now = evaluation
+            .tasks
+            .iter()
+            .map(|t| Outstanding {
+                kind: t.kind,
+                key: t.key.0.clone(),
+                target: t.target.to_string(),
+                severity: t.severity,
+                rationale: t.rationale.clone(),
+                due_in_days: garden_core::time::days_between(at, t.due.latest),
+            })
+            .collect();
+        summary.suppressed_now = evaluation.suppressed.iter().map(|s| s.explain()).collect();
+        summary.capabilities_now = state.capabilities.iter().map(|c| c.label()).collect();
+
         previous = keys;
     }
 
@@ -364,6 +407,77 @@ mod tests {
         assert!(
             summary.days.iter().skip(25).all(|d| d.outstanding == 0),
             "a pulled plant should stop generating work"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_high_raise_count_can_still_end_with_nothing_outstanding() {
+        // Why `outstanding_now` exists at all. `totals` counts raise events over the
+        // window; the `tasks` table holds only what is open. Reading a large total as
+        // "so the table should have rows" sent an evening chasing a dispatcher bug
+        // that was not there, so the two numbers now appear side by side and the
+        // report says which is which.
+        let (store, garden) = fixture().await;
+        plant_kale(&store, garden, t0()).await;
+        store
+            .remove_planting(garden, garden_core::PlantingId(1), add_days(t0(), 20.0))
+            .await
+            .unwrap();
+
+        let summary = run(
+            &store,
+            garden,
+            Geometry::STUDIO_2,
+            &garden_rules::default_engine(),
+            t0(),
+            add_days(t0(), 60.0),
+            &[],
+        )
+        .await
+        .unwrap();
+
+        assert!(summary.total_tasks() > 0, "work was raised while it grew");
+        assert!(
+            summary.outstanding_now.is_empty(),
+            "and none of it is open now: {:?}",
+            summary.outstanding_now
+        );
+    }
+
+    #[tokio::test]
+    async fn outstanding_now_is_the_last_day_and_carries_its_reasons() {
+        let (store, garden) = fixture().await;
+        // Comfortably past first harvest, so something is certainly open.
+        plant_kale(&store, garden, add_days(t0(), -90.0)).await;
+
+        let summary = run(
+            &store,
+            garden,
+            Geometry::STUDIO_2,
+            &garden_rules::default_engine(),
+            t0(),
+            add_days(t0(), 2.0),
+            &[],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            summary.outstanding_now.len(),
+            summary.days.last().unwrap().outstanding,
+            "outstanding_now must describe the last day, not an earlier one"
+        );
+        assert!(summary.outstanding_now.iter().any(|t| t.kind == TaskKind::Harvest));
+        assert!(
+            summary.outstanding_now.iter().all(|t| !t.rationale.is_empty()),
+            "every task must say why"
+        );
+        // No sensor ever reported here, so the sensor-backed rules must account for
+        // themselves rather than vanish silently.
+        assert!(summary.capabilities_now.is_empty());
+        assert!(
+            !summary.suppressed_now.is_empty(),
+            "a blind garden should list the rules that stood down"
         );
     }
 

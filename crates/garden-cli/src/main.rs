@@ -1003,6 +1003,44 @@ async fn replay_cmd(store: &Store, args: ReplayArgs) -> Fallible {
     }
     println!();
 
+    // First, because it is the only part of this report comparable to the `tasks`
+    // table and to the "what needs doing" tile. Everything below counts *raises* over
+    // the window; this is what is open at the end of it.
+    println!("outstanding now ({})", summary.outstanding_now.len());
+    if summary.outstanding_now.is_empty() {
+        println!("    nothing — the rules have no outstanding work for this garden.");
+        println!("    So an empty tile is agreement, not a fault. What the rules could");
+        println!("    read is listed below; a rule that cannot see is a rule that is quiet.");
+    }
+    for task in &summary.outstanding_now {
+        let due = if task.due_in_days < 0.0 {
+            format!("{:.0}d overdue", -task.due_in_days)
+        } else {
+            format!("due in {:.0}d", task.due_in_days)
+        };
+        println!(
+            "    {:<22} {:<10} {:<14} {}",
+            task.kind, task.severity, due, task.target
+        );
+        println!("        {}", task.rationale);
+    }
+
+    println!(
+        "\ncapabilities on the last day: {}",
+        if summary.capabilities_now.is_empty() {
+            "none — every sensor-backed rule stood down".to_string()
+        } else {
+            summary.capabilities_now.join(", ")
+        }
+    );
+    if !summary.suppressed_now.is_empty() {
+        println!("rules that could not run");
+        for reason in &summary.suppressed_now {
+            println!("    {reason}");
+        }
+    }
+    println!();
+
     if args.verbose {
         for day in &summary.days {
             for (kind, rationale) in &day.new_tasks {
@@ -1024,7 +1062,9 @@ async fn replay_cmd(store: &Store, args: ReplayArgs) -> Fallible {
         println!("    {kind:<22} {count}");
     }
     println!(
-        "\n    {} tasks over {} days",
+        "\n    {} times a task was raised over {} days — not a count of open work.\n    \
+         A task raised once and never resolved counts one; one that flapped six\n    \
+         times counts six. For open work see 'outstanding now' above.",
         summary.total_tasks(),
         summary.days.len()
     );

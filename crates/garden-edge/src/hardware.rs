@@ -581,7 +581,7 @@ mod aht20_tests {
         // our AM2320 read returned nothing; those are 394992 and 575469 over 2²⁰.
         let (temp, humidity) = aht20_convert(&frame(0x1C, 575_469, 394_992)).unwrap();
         assert!((temp - 25.338_745).abs() < 1e-3, "{temp}");
-        assert!((humidity - 54.881_00).abs() < 1e-3, "{humidity}");
+        assert!((humidity - 54.881).abs() < 1e-3, "{humidity}");
     }
 
     #[test]

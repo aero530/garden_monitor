@@ -3,7 +3,7 @@
 use crate::app::{AppState, Auth};
 use crate::error::AppError;
 use crate::ui;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Form, Router, routing::get, routing::post};
@@ -16,6 +16,7 @@ use serde::Deserialize;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/account/notifications", get(page).post(save))
+        .route("/account/notifications/test", post(send_test))
         .route("/account/notifications/calendar", post(issue_calendar))
         .route(
             "/account/notifications/calendar/revoke",
@@ -24,9 +25,20 @@ pub fn routes() -> Router<AppState> {
         .route("/calendar/{token}/feed.ics", get(calendar_feed))
 }
 
-async fn page(State(state): State<AppState>, Auth(actor): Auth) -> Result<Markup, AppError> {
+#[derive(Deserialize, Default)]
+pub struct PageQuery {
+    /// What the test button did, good or bad.
+    notice: Option<String>,
+    error: Option<String>,
+}
+
+async fn page(
+    State(state): State<AppState>,
+    Auth(actor): Auth,
+    Query(query): Query<PageQuery>,
+) -> Result<Markup, AppError> {
     let prefs = state.store.notification_prefs(actor.id()).await?;
-    Ok(render(&state, &actor, &prefs, None))
+    Ok(render_with(&state, &actor, &prefs, None, &query))
 }
 
 fn render(
@@ -34,6 +46,16 @@ fn render(
     actor: &garden_auth::Actor,
     prefs: &NotificationPrefs,
     fresh_feed: Option<&str>,
+) -> Markup {
+    render_with(state, actor, prefs, fresh_feed, &PageQuery::default())
+}
+
+fn render_with(
+    state: &AppState,
+    actor: &garden_auth::Actor,
+    prefs: &NotificationPrefs,
+    fresh_feed: Option<&str>,
+    query: &PageQuery,
 ) -> Markup {
     let configured = state.notifier.is_some();
     let suggested_topic = format!(
@@ -53,6 +75,12 @@ fn render(
         Some(actor),
         html! {
             h1 { "Notifications" }
+            @if let Some(error) = &query.error {
+                p.error { (error) }
+            }
+            @if let Some(notice) = &query.notice {
+                p { span.pill.health-up { (notice) } }
+            }
 
             @if !configured {
                 div.card {
@@ -77,6 +105,11 @@ fn render(
                       value=(prefs.ntfy_topic.clone().unwrap_or_default())
                       placeholder=(format!("{suggested_topic}-8f3a2c"));
                 p.small.muted { "Leave blank for no push notifications." }
+                p.small.muted {
+                    "Save first, then use " strong { "Send a test" } " below — a topic the "
+                    "app is not subscribed to looks exactly like one that works, until a "
+                    "real task fails to arrive."
+                }
 
                 h3 style="margin-top:1.5rem" { "Email" }
                 label {
@@ -117,6 +150,22 @@ fn render(
                 }
 
                 p style="margin-top:1rem" { button.primary type="submit" { "Save" } }
+            }
+
+            // Outside the settings form on purpose: a submit button inside it would
+            // save and test in one click, and you want to know which of the two you
+            // just did when something goes wrong.
+            div.card {
+                h3 { "Check it reaches you" }
+                p.small.muted {
+                    "Sends one notification now, through the same channel a real task "
+                    "would use. Quiet hours and the once-per-task rule are skipped — "
+                    "they exist to suppress notifications, and a test that could be "
+                    "suppressed would tell you nothing."
+                }
+                form method="post" action="/account/notifications/test" {
+                    button type="submit" disabled[!configured] { "Send a test" }
+                }
             }
 
             div.card {
@@ -187,6 +236,126 @@ async fn save(
     };
     state.store.save_notification_prefs(&prefs).await?;
     Ok(Redirect::to("/account/notifications").into_response())
+}
+
+/// Send one notification, right now, through the real machinery.
+///
+/// Without this you configure a topic and then find out whether it works when a real
+/// task fires — possibly tomorrow morning, since anything below `important` waits for
+/// the daily brief. That is a poor feedback loop for the one part of the system whose
+/// entire job is reaching you, and it is the reason this button exists.
+///
+/// It goes through the same [`Notifier`] and the same channel the dispatcher uses, so a
+/// success here means the whole path works: brain to ntfy, ntfy to phone. The only
+/// thing deliberately skipped is [`policy::decide`] — quiet hours, the once-per-task
+/// rule and the per-sweep cap all exist to *suppress* notifications, and a test that
+/// could be suppressed would tell you nothing.
+///
+/// [`Notifier`]: garden_notify::Notifier
+/// [`policy::decide`]: garden_notify::decide
+async fn send_test(
+    State(state): State<AppState>,
+    Auth(actor): Auth,
+) -> Result<Response, AppError> {
+    let prefs = state.store.notification_prefs(actor.id()).await?;
+
+    let Some(notifier) = state.notifier.as_ref() else {
+        return Ok(notify_result(
+            "No channel is configured on the server — GARDEN_NTFY_URL is unset, so \
+             nothing can be sent however this page is filled in.",
+            false,
+        ));
+    };
+    if prefs.ntfy_topic.is_none() && !prefs.email_enabled {
+        return Ok(notify_result(
+            "Set a topic (or tick email) and save, then try again.",
+            false,
+        ));
+    }
+
+    let note = garden_notify::Notification {
+        title: "Garden test".into(),
+        body: "If you are reading this on your phone, notifications work. \
+               Nothing is wrong with your garden."
+            .into(),
+        // Deliberately mid-ladder: high enough to arrive now rather than in the
+        // morning brief, low enough not to break Do Not Disturb for a test.
+        priority: 3,
+        tags: vec!["seedling".into()],
+        actions: Vec::new(),
+        open_url: Some(format!("{}/account/notifications", state.config.base_url)),
+    };
+
+    // Both channels the preferences ask for, so a test exercises what a real
+    // notification would use rather than a subset of it.
+    let reach = garden_notify::Reach {
+        push: prefs.ntfy_topic.is_some(),
+        email: prefs.email_enabled,
+        priority: note.priority,
+        // Irrelevant here — this is the field `policy::decide` reads to hold something
+        // for the daily brief, and a test that could be held is not a test.
+        interrupts: true,
+    };
+    let delivered = notifier
+        .deliver(
+            &note,
+            reach,
+            prefs.ntfy_topic.as_deref(),
+            Some(actor.user.email.as_str()),
+        )
+        .await;
+
+    tracing::info!(
+        user = %actor.id(),
+        push = delivered.push,
+        email = delivered.email,
+        "test notification sent"
+    );
+
+    Ok(match (delivered.push, delivered.email) {
+        (true, true) => notify_result("Sent by push and email.", true),
+        (true, false) if prefs.email_enabled => notify_result(
+            "Push sent. Email failed — check the server log; self-hosted outbound mail \
+             is the unreliable one.",
+            true,
+        ),
+        (true, false) => notify_result("Push sent. Check your phone.", true),
+        (false, true) => notify_result("Email sent. Push failed — check the server log.", true),
+        (false, false) => notify_result(
+            "Nothing could be delivered. The topic is set, so the server could not \
+             reach ntfy — check GARDEN_NTFY_URL and GARDEN_NTFY_TOKEN, and the log.",
+            false,
+        ),
+    })
+}
+
+/// Back to the settings page carrying a sentence about what happened.
+///
+/// A redirect rather than a rendered page, so a refresh does not send a second test.
+fn notify_result(message: &str, ok: bool) -> Response {
+    let key = if ok { "notice" } else { "error" };
+    Redirect::to(&format!(
+        "/account/notifications?{key}={}",
+        urlencode(message)
+    ))
+    .into_response()
+}
+
+/// Minimal percent-encoding for a query value.
+///
+/// These are fixed strings from just above rather than anything a user supplied, but
+/// they contain spaces, commas and full stops, and a raw one would produce a URL that
+/// some proxies rewrite and some browsers refuse.
+fn urlencode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            b' ' => "+".to_string(),
+            other => format!("%{other:02X}"),
+        })
+        .collect()
 }
 
 async fn issue_calendar(
@@ -285,4 +454,70 @@ async fn calendar_feed(
         render_calendar(&title, &entries, now),
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_result_message_survives_the_round_trip_through_a_url() {
+        // These sentences carry spaces, commas and full stops, and they travel as a
+        // query value. A raw one produces a URL some proxies rewrite and some browsers
+        // refuse, and the operator sees a blank page instead of the reason.
+        let encoded = urlencode("Push sent. Check your phone.");
+        assert!(!encoded.contains(' '), "{encoded}");
+        assert_eq!(encoded, "Push+sent.+Check+your+phone.");
+    }
+
+    #[test]
+    fn encoding_leaves_nothing_that_could_break_out_of_the_query() {
+        for raw in [
+            "GARDEN_NTFY_URL is unset — nothing can be sent",
+            "a & b = c?d#e",
+            "quotes \" and '",
+        ] {
+            let encoded = urlencode(raw);
+            for bad in ['&', '=', '?', '#', '"', '\'', '<', '>', ' '] {
+                assert!(
+                    !encoded.contains(bad),
+                    "{bad:?} survived encoding of {raw:?}: {encoded}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_failure_redirects_as_an_error_and_a_success_as_a_notice() {
+        // Different query keys, because the page renders one in red and one in green,
+        // and "sent" appearing in red would be its own small confusion.
+        let ok = notify_result("Push sent.", true);
+        let bad = notify_result("Nothing could be delivered.", false);
+        let location = |r: &Response| {
+            r.headers()
+                .get(axum::http::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert!(location(&ok).contains("notice="), "{}", location(&ok));
+        assert!(location(&bad).contains("error="), "{}", location(&bad));
+    }
+
+    #[test]
+    fn the_test_notification_is_not_urgent_enough_to_break_do_not_disturb() {
+        // Priority 5 bypasses Do Not Disturb on both platforms. That is reserved for a
+        // tank about to run dry, and a person checking their settings at midnight
+        // should not be woken by their own button.
+        let note = garden_notify::Notification {
+            title: "Garden test".into(),
+            body: String::new(),
+            priority: 3,
+            tags: vec![],
+            actions: vec![],
+            open_url: None,
+        };
+        assert!(note.priority < 5);
+        assert!(note.priority > 2, "but high enough to arrive now");
+    }
 }

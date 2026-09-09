@@ -166,7 +166,12 @@ async fn replay_reports_what_the_rules_would_have_said() {
 
     assert!(out.contains("Kitchen"));
     assert!(out.contains("first raised"), "{out}");
-    assert!(out.contains("tasks over"), "{out}");
+    assert!(out.contains("times a task was raised"), "{out}");
+    // The number that is comparable to the `tasks` table, and the one the report used
+    // to compute and discard. Without it the summary answers a different question than
+    // the one it is usually run to answer.
+    assert!(out.contains("outstanding now"), "{out}");
+    assert!(out.contains("capabilities on the last day"), "{out}");
     // No sensor ever reported, and a replay that quietly hid that would be measuring
     // the gap rather than the garden.
     assert!(out.contains("no sensor reading"), "{out}");

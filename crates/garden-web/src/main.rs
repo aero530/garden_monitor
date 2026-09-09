@@ -78,10 +78,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let notifier = build_notifier();
-    if notifier.is_none() {
-        tracing::warn!(
-            "no notification channel configured — set GARDEN_NTFY_URL and/or              GARDEN_SMTP_HOST. Tasks will appear in the web UI but nothing will be sent."
-        );
+    // Says so either way, because "no line in the log" is not an answer.
+    //
+    // This used to warn only when nothing was configured, which meant a silent start-up
+    // was ambiguous: had the notifier been built, or had the log rotated, or had you
+    // grepped the wrong range? A positive line makes the check `grep -i notif` actually
+    // conclusive.
+    match notifier.as_ref() {
+        Some(n) => tracing::info!(
+            push = n.ntfy.is_some(),
+            email = n.email.is_some(),
+            "notification channels ready"
+        ),
+        None => tracing::warn!(
+            "no notification channel configured — set GARDEN_NTFY_URL and/or \
+             GARDEN_SMTP_HOST. Tasks will appear in the web UI but nothing will be sent."
+        ),
     }
 
     let state = AppState::new(
