@@ -248,11 +248,16 @@ async fn upload_frame(
     // JPEG on a single ARMv6 core, never has to touch it.
     //
     // The agent's own width and height headers describe the frame as shot, so they are
-    // taken from the rotated image instead: believing the headers would leave a 1080×1920
-    // file recorded as 1920×1080, and `roi` rejects a frame whose size disagrees with the
+    // taken from the rotated image instead: believing the headers would leave a 1080×1440
+    // file recorded as 3264×2448, and `roi` rejects a frame whose size disagrees with the
     // map rather than rescaling it.
+    //
+    // The same pass downscales. The agent sends the camera's full sensor because the
+    // smaller modes on this hardware are centre crops that cost field of view, so the
+    // frame arrives at 8 MP and has no business being stored that way.
     let rotation = record.model.camera_rotation();
-    let (bytes, width, height) = match garden_vision::orient::orient(&body, rotation) {
+    let max_edge = Some(garden_vision::orient::MAX_STORED_EDGE);
+    let (bytes, width, height) = match garden_vision::orient::orient(&body, rotation, max_edge) {
         Ok(oriented) => (
             std::borrow::Cow::Owned(oriented.bytes),
             oriented.width,

@@ -981,7 +981,7 @@ gated on hardware.
 | **1** | `garden-edge` read-only + parity capture of factory PWM | ✅ **complete** — five of six base capabilities reporting to the brain, and the factory schedule confirmed by observation over 40 121 samples with no gaps ([`baseline/factory-schedule.md`](baseline/factory-schedule.md)). Every transition landed within seconds of its scheduled time |
 | **2** | `garden-brain`: ingest, SQLite, state estimation, dashboard, slot/planting model | Water forecasting accurate |
 | **3** | `garden-rules` + notifications (ntfy/email/iCal) + ack loop + auto-verify | Useful without vision |
-| **4** | `garden-vision` `CanopyMetrics`: undistortion, ROI calibration, canopy tracking | ✅ built, and frames now arrive upright. Needs a calibrated garden: **size the ROI map to the rotated frame** — `garden-cli vision init --width 1080 --height 1920` for a Studio 2, not the 1920×1080 the camera reports |
+| **4** | `garden-vision` `CanopyMetrics`: undistortion, ROI calibration, canopy tracking | ✅ built, and frames now arrive upright and uncropped. Needs a calibrated garden: **size the ROI map to the stored frame, not to anything the camera reports** — `garden-cli vision init --width 1080 --height 1440` for a Studio 2. The sensor is 3264×2448 (4:3); the brain turns it a quarter and scales the long edge to 1440 |
 | **5** | DS18B20 water temperature → root-zone rules | Probe reading reliably |
 | **6** | **Takeover**: `garden-guard`, failsafe, cut cloud, own lights + pump, photo mode | Parity proven, rollback tested |
 | **7** | Succession planner | ✅ first cut — greedy, per slot and tower-wide |
