@@ -20,3 +20,10 @@ garden-data/
 
 # Scratch notes. Holds the agent token and garden id, so it stays local.
 info.txt
+
+# Calibration working files. The ROI map that matters is uploaded to the brain by
+# `vision apply` and stored per garden, so a copy here is scratch — and one left
+# behind after a frame size changes is worse than scratch, because it still loads.
+rois.json
+rois-preview.png
+tower.jpg
