@@ -239,9 +239,37 @@ before you start collecting a week of data without it.
 > crontab survives reboots just as well:
 >
 > ```sh
+> cat > ~/garden-edge.sh <<'EOF'
+> #!/bin/sh
+> export GARDEN_BRAIN_URL=http://192.168.1.20:8080
+> export GARDEN_AGENT_TOKEN=replace-me
+> export GARDEN_GARDEN_ID=replace-me
+> export GARDEN_AGENT_NAME=studio-edge
+> export GARDEN_SPOOL_DIR=$HOME/garden-spool
+> export GARDEN_HEARTBEAT=$HOME/garden.heartbeat
+> # `Restart=always`, by hand. Without the loop, cron starts the agent once and a
+> # crash means no telemetry until the next reboot — which reads as a dead sensor
+> # rather than a dead process, and is how a month of history ends up mostly gaps.
+> while true; do
+>   /home/pi/garden-edge run
+>   sleep 10
+> done
+> EOF
+> chmod 700 ~/garden-edge.sh    # it holds the agent token
+>
 > crontab -e
-> # @reboot /home/pi/garden-edge watch-pwm --out /home/pi/parity.csv
+> # @reboot /home/pi/garden-edge.sh >> /home/pi/garden-edge.log 2>&1
 > ```
+>
+> Start it now rather than waiting for a reboot, and check it stays up:
+>
+> ```sh
+> nohup ~/garden-edge.sh >> ~/garden-edge.log 2>&1 &
+> sleep 90 && tail ~/garden-edge.log
+> ```
+>
+> For the parity capture instead, the same wrapper with `watch-pwm --out
+> ~/parity.csv` in place of `run`. They read the same pins and can run together.
 >
 > **Two paths default to places only root can write.** Both warn rather than fail, and
 > both matter later rather than now:
@@ -285,6 +313,21 @@ EOF
 sudo chmod 600 /etc/garden/edge.env    # it holds the token
 ```
 
+`/run/garden` has to exist and be writable, and neither service may own its
+lifetime — the agent writes `edge.heartbeat` there and `garden-guard` writes
+`guard.engaged`. `RuntimeDirectory=garden` would create it, then delete it when
+whichever service stops first stops, taking the other's file with it, and
+`RuntimeDirectoryPreserve=` needs systemd 235 while stretch has 232. So create it at
+boot instead, independent of both:
+
+```sh
+sudo tee /etc/tmpfiles.d/garden.conf >/dev/null <<'EOF'
+d /run/garden 0755 pi pi -
+EOF
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/garden.conf
+ls -ld /run/garden    # drwxr-xr-x pi pi
+```
+
 `/etc/systemd/system/garden-edge.service`:
 
 ```ini
@@ -306,7 +349,13 @@ SupplementaryGroups=gpio
 # Read-only phase: no need for root, and no reason to give it.
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/garden
+# Both, and the second is easy to leave out. `ProtectSystem=strict` mounts the whole
+# hierarchy read-only bar /dev, /proc and /sys — /run included — so without this the
+# agent's `create_dir_all("/run/garden")` fails with EROFS and the heartbeat is never
+# written. It warns once and carries on, which is correct for Phase 1 because nothing
+# reads it yet. At Phase 6 it inverts: a missing heartbeat counts as infinitely stale,
+# so `garden-guard` concludes a perfectly healthy agent is dead and seizes the pins.
+ReadWritePaths=/var/lib/garden /run/garden
 
 [Install]
 WantedBy=multi-user.target
