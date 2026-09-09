@@ -16,7 +16,10 @@ Wants=network-online.target
 [Container]
 Image=docker.io/ollama/ollama:latest
 Volume=/var/lib/garden-ollama:/root/.ollama:Z
-Network=garden.network
+# Aliased for the same reason as garden-ntfy: podman's DNS publishes the container
+# name, which Quadlet makes `systemd-garden-ollama`, so the URL documented below
+# needs this to resolve at all.
+Network=garden.network:alias=garden-ollama
 # Deliberately no PublishPort. Nothing outside the garden network should reach
 # this, and the brain finds it at http://garden-ollama:11434 by container name.
 

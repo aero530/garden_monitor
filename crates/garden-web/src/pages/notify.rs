@@ -309,24 +309,41 @@ async fn send_test(
         user = %actor.id(),
         push = delivered.push,
         email = delivered.email,
+        why = delivered.why(),
         "test notification sent"
     );
 
     Ok(match (delivered.push, delivered.email) {
         (true, true) => notify_result("Sent by push and email.", true),
         (true, false) if prefs.email_enabled => notify_result(
-            "Push sent. Email failed — check the server log; self-hosted outbound mail \
-             is the unreliable one.",
+            &failed("Push sent. Email did not go out", delivered.email_error.as_deref()),
             true,
         ),
         (true, false) => notify_result("Push sent. Check your phone.", true),
-        (false, true) => notify_result("Email sent. Push failed — check the server log.", true),
+        (false, true) => notify_result(
+            &failed("Email sent. Push did not go out", delivered.push_error.as_deref()),
+            true,
+        ),
+        // The reason, not a guess at it. A DNS failure and a rejected token look
+        // identical from here and want opposite fixes.
         (false, false) => notify_result(
-            "Nothing could be delivered. The topic is set, so the server could not \
-             reach ntfy — check GARDEN_NTFY_URL and GARDEN_NTFY_TOKEN, and the log.",
+            &failed("Nothing could be delivered", delivered.why().as_deref()),
             false,
         ),
     })
+}
+
+/// A failure sentence carrying the underlying reason, when there is one.
+fn failed(what: &str, why: Option<&str>) -> String {
+    match why {
+        Some(reason) => format!("{what} — {reason}"),
+        // Reached when a channel was never attempted: no topic set, or no mail
+        // configured. Saying so beats naming a setting that is already correct.
+        None => format!(
+            "{what}. No channel was even tried — set a topic below, or configure \
+             GARDEN_NTFY_URL and GARDEN_SMTP_HOST on the server."
+        ),
+    }
 }
 
 /// Back to the settings page carrying a sentence about what happened.
@@ -502,6 +519,34 @@ mod tests {
         };
         assert!(location(&ok).contains("notice="), "{}", location(&ok));
         assert!(location(&bad).contains("error="), "{}", location(&bad));
+    }
+
+    #[test]
+    fn a_failure_carries_the_underlying_reason_rather_than_a_guess() {
+        // The whole value of the test button. "The server could not reach ntfy" sent
+        // an evening at GARDEN_NTFY_TOKEN when the truth was that `garden-ntfy` did
+        // not resolve — a name podman never published, because Quadlet had called the
+        // container `systemd-garden-ntfy`.
+        let dns = failed(
+            "Nothing could be delivered",
+            Some("push: network: error sending request for url (http://garden-ntfy:8090/)"),
+        );
+        assert!(dns.contains("garden-ntfy:8090"), "{dns}");
+
+        let rejected = failed(
+            "Nothing could be delivered",
+            Some("push: ntfy rejected the message: 401 Unauthorized"),
+        );
+        assert!(rejected.contains("401"), "{rejected}");
+        assert_ne!(dns, rejected, "two different faults must read differently");
+    }
+
+    #[test]
+    fn a_channel_that_was_never_tried_says_so_instead_of_blaming_a_setting() {
+        // No reason means nothing was attempted: no topic, or nothing configured.
+        // Naming GARDEN_NTFY_URL here would send someone to check a correct value.
+        let message = failed("Nothing could be delivered", None);
+        assert!(message.contains("No channel was even tried"), "{message}");
     }
 
     #[test]

@@ -240,7 +240,12 @@ async fn deliver_one(
     if !delivered.any() {
         // Not recorded, so the next sweep retries rather than treating a failed
         // delivery as done and going quiet.
-        tracing::warn!(task = %task.key, user = %user.id, "no channel accepted the notification");
+        tracing::warn!(
+            task = %task.key,
+            user = %user.id,
+            why = delivered.why(),
+            "no channel accepted the notification"
+        );
         return Ok(false);
     }
 

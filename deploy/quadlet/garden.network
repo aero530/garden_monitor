@@ -1,6 +1,10 @@
-# A private network so the brain can reach ntfy (and Ollama) by container name
-# instead of by IP. Podman runs a DNS server on it; `http://garden-ntfy:8090`
-# resolves from inside garden-web and from nowhere else on the machine.
+# A private network so the brain can reach ntfy (and Ollama) by name instead of by
+# IP. Podman runs a DNS server on it; `http://garden-ntfy:8090` resolves from inside
+# garden-web and from nowhere else on the machine.
+#
+# By *alias*, not by container name: Quadlet calls the containers `systemd-garden-*`,
+# so each one declares `Network=garden.network:alias=garden-ntfy` to publish the
+# short name the brain and the Caddyfile actually use.
 #
 # Install to /etc/containers/systemd/garden.network
 

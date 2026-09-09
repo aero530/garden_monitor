@@ -31,7 +31,17 @@ PublishPort=192.168.86.10:8090:8090
 Volume=/etc/garden/ntfy-server.yml:/etc/ntfy/server.yml:Z,ro
 Volume=/var/lib/garden-ntfy:/var/lib/ntfy:Z
 Volume=/var/cache/garden-ntfy:/var/cache/ntfy:Z
-Network=garden.network
+# The `:alias=` is the name the brain and Caddy dial, and it has to be said here.
+#
+# Quadlet names the container `systemd-garden-ntfy`, and podman's DNS publishes the
+# container *name* — so `http://garden-ntfy:8090`, which web.env.example, the
+# Caddyfile and garden.network all document, resolved to nothing at all. Push failed
+# with a DNS error that reads like an unreachable server, and the natural next move
+# is to re-check the token, which was never the problem.
+#
+# An alias rather than `ContainerName=garden-ntfy`, so every `podman exec -it
+# systemd-garden-ntfy ...` in DEPLOYMENT.md keeps working.
+Network=garden.network:alias=garden-ntfy
 # ntfy's image runs as root by default; it has no need to.
 User=1000:1000
 NoNewPrivileges=true

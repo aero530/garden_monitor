@@ -34,15 +34,32 @@ pub struct Notifier {
     pub email: Option<EmailChannel>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Delivered {
     pub push: bool,
     pub email: bool,
+    /// Why push did not go out, when it was attempted and failed.
+    ///
+    /// Carried rather than only logged, because the caller that most needs it is the
+    /// "send a test notification" button, whose entire purpose is to say what is
+    /// wrong. Reporting "the server could not reach ntfy" when the truth was
+    /// `401 unauthorized` sends you to check the wrong setting.
+    pub push_error: Option<String>,
+    pub email_error: Option<String>,
 }
 
 impl Delivered {
-    pub fn any(self) -> bool {
+    pub fn any(&self) -> bool {
         self.push || self.email
+    }
+
+    /// The failures, for a log line or an operator-facing message.
+    pub fn why(&self) -> Option<String> {
+        let reasons: Vec<&str> = [self.push_error.as_deref(), self.email_error.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect();
+        (!reasons.is_empty()).then(|| reasons.join("; "))
     }
 }
 
@@ -74,7 +91,7 @@ impl Notifier {
         {
             match channel.send(topic, note).await {
                 Ok(()) => delivered.push = true,
-                Err(e) => tracing_warn(&format!("ntfy delivery failed: {e}")),
+                Err(e) => delivered.push_error = Some(format!("push: {e}")),
             }
         }
 
@@ -83,18 +100,12 @@ impl Notifier {
         {
             match channel.send(address, note).await {
                 Ok(()) => delivered.email = true,
-                Err(e) => tracing_warn(&format!("email delivery failed: {e}")),
+                Err(e) => delivered.email_error = Some(format!("email: {e}")),
             }
         }
 
         delivered
     }
-}
-
-/// Logged rather than propagated: a channel that is down is an operational fact, not
-/// a reason to abandon the dispatch loop for every other recipient.
-fn tracing_warn(message: &str) {
-    eprintln!("garden-notify: {message}");
 }
 
 #[cfg(test)]
@@ -151,6 +162,59 @@ mod tests {
             .deliver(&note, reach_for(Severity::Critical), None, None)
             .await;
         assert!(!delivered.push);
+    }
+
+    #[tokio::test]
+    async fn a_channel_that_fails_reports_why_rather_than_only_that_it_failed() {
+        // `Delivered` used to be two booleans, and the reason went to stderr via
+        // `eprintln!` — untagged, so it matched no sensible grep. The caller left
+        // holding a bare `false` was the "send a test" button, which then had to
+        // guess: it blamed the URL and the token, and the actual fault was a
+        // container name that did not resolve.
+        let notifier = Notifier::new(
+            // Port 1: nothing listens, so this fails at connect, quickly.
+            Some(NtfyChannel::new(NtfyConfig {
+                base_url: "http://127.0.0.1:1".into(),
+                token: None,
+            })
+            .unwrap()),
+            None,
+        );
+        let note = compose(
+            TaskKind::AddWater,
+            "garden",
+            "Kitchen",
+            "tank low",
+            None,
+            Severity::Critical,
+            5,
+            None,
+            Vec::new(),
+        );
+        let delivered = notifier
+            .deliver(&note, reach_for(Severity::Critical), Some("topic"), None)
+            .await;
+
+        assert!(!delivered.any());
+        let why = delivered.why().expect("a failed attempt must say why");
+        assert!(why.starts_with("push:"), "{why}");
+        assert!(why.contains("127.0.0.1:1"), "the address belongs in it: {why}");
+    }
+
+    #[test]
+    fn nothing_attempted_is_distinguishable_from_something_that_failed() {
+        // The difference between "no topic set" and "ntfy refused you", which want
+        // opposite fixes and used to render as the same sentence.
+        assert_eq!(Delivered::default().why(), None);
+        assert_eq!(
+            Delivered {
+                push_error: Some("push: 401".into()),
+                ..Default::default()
+            }
+            .why()
+            .as_deref(),
+            Some("push: 401")
+        );
     }
 
     #[test]
