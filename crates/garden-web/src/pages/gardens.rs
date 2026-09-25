@@ -229,6 +229,12 @@ async fn detail(
     demo::ensure_frame(&state.store, &garden, &snapshot, now).await?;
 
     let has_telemetry = crate::state::has_telemetry(&snapshot);
+    let baseline_source = state
+        .store
+        .pump_baseline(garden.id)
+        .await?
+        .filter(|b| b.nominal_ma.is_some())
+        .map(|b| b.source);
     let latest_frame = state.store.latest_frame(id).await?;
 
     let tasks = state.store.tasks_for(id).await?;
@@ -287,7 +293,7 @@ async fn detail(
             }
 
             @if has_telemetry {
-                (sensors(&snapshot))
+                (sensors(&snapshot, baseline_source))
             } @else {
                 div.card {
                     h3 { "No sensors reporting" }
@@ -381,7 +387,10 @@ async fn detail(
     ))
 }
 
-fn sensors(state: &GardenState) -> Markup {
+fn sensors(
+    state: &GardenState,
+    baseline_source: Option<garden_store::pump::BaselineSource>,
+) -> Markup {
     let fill = state.fill_fraction() * 100.0;
     let days = state
         .tank
@@ -421,7 +430,17 @@ fn sensors(state: &GardenState) -> Markup {
                 @match state.pump.restriction_ratio() {
                     Some(ratio) => {
                         div.stat { (format!("{:+.0}%", (ratio - 1.0) * 100.0)) }
-                        p.small.muted style="margin:0" { "against clean baseline" }
+                        // Which reference, because they are not equally good. One taken
+                        // after a deep clean means what it says; one seeded from the
+                        // first readings of a garden nobody had measured is only
+                        // "however it was running when we met it", and if it was already
+                        // fouled then fouling will never look like fouling.
+                        p.small.muted style="margin:0" {
+                            @match baseline_source {
+                                Some(source) => { "vs draw measured " (source.label()) }
+                                None => { "against clean baseline" }
+                            }
+                        }
                     }
                     // Not a zero and not a dash-shaped nothing: the pump runs four
                     // times a day for five minutes, so "we have not caught it yet" is
@@ -429,7 +448,13 @@ fn sensors(state: &GardenState) -> Markup {
                     // tile should say which of the two it is.
                     None => {
                         div.stat { "—" }
-                        p.small.muted style="margin:0" { "not yet measured running" }
+                        p.small.muted style="margin:0" {
+                            @if state.pump.nominal_ma.is_none() {
+                                "learning its clean draw"
+                            } @else {
+                                "not yet measured running"
+                            }
+                        }
                     }
                 }
             }

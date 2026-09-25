@@ -66,14 +66,14 @@ impl GardenState {
             tank: TankState::new(tank_geometry.capacity_l),
             sensors: SensorSnapshot::empty(now),
             mode: GardenMode::default(),
-            pump: PumpBaseline::new(Self::NOMINAL_PUMP_MA),
+            // Unknown until something measures it. A placeholder here is how the
+            // restriction percentage came to be a comparison against a number
+            // nobody had ever measured; see `PumpBaseline::nominal_ma`.
+            pump: PumpBaseline::unknown(),
             slot_metrics: BTreeMap::new(),
             algae: None,
         }
     }
-
-    /// Placeholder clean-system pump draw; re-baselined from the real device in Phase 1.
-    const NOMINAL_PUMP_MA: f32 = 400.0;
 
     /// Whether there is anything in the garden worth tending.
     ///

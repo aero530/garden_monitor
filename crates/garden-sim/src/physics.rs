@@ -6,6 +6,9 @@
 //! season rather than a single snapshot. Every coefficient here is a guess to be
 //! replaced with fitted values once Phase 1 telemetry exists.
 
+/// What the simulated pump draws with clear lines.
+pub const CLEAN_PUMP_MA: f32 = 400.0;
+
 use garden_core::{
     GardenState, PlantingId, SlotId, SlotMetrics, Stage, ewma,
     time::{add_days, days_between},
@@ -259,7 +262,11 @@ pub fn sense(state: &mut GardenState, env: &Environment, fouling: Fouling, rng: 
 
     state.sensors.water_temp_c = Some((env.air_temp_c + env.water_temp_offset_c) * (1.0 + rng.noise(n * 0.5)));
 
-    let draw = state.pump.nominal_ma * (1.0 + fouling.pump_penalty()) * (1.0 + rng.noise(n));
+    // The simulated hardware's own clean draw, which is a different thing from the
+    // brain's *measured reference* for it. They used to be the same field, so the sim
+    // could not model the case that matters most: a garden whose reference has not
+    // been established, or was established against a system that was already fouled.
+    let draw = CLEAN_PUMP_MA * (1.0 + fouling.pump_penalty()) * (1.0 + rng.noise(n));
     state.sensors.pump_current_ma = Some(draw);
     // `observe` drops anything below the running threshold by itself, so a simulated
     // pump that is off leaves the measurement alone rather than averaging its idle

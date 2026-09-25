@@ -152,6 +152,16 @@ async fn record_against_tank(
         return Ok(());
     };
     state.store.record_tank_event(garden, event, by, now).await?;
+
+    // A deep clean voids the pump's clean reference rather than setting it.
+    //
+    // Setting it here would be the obvious thing and the wrong one: every reading on
+    // record at this instant was taken while the lines were still fouled, so it would
+    // define "clean" as the state that prompted the clean and the restriction would
+    // read 0% forever after. The dispatcher learns a new one from readings after now.
+    if matches!(kind, garden_core::TaskKind::DeepClean) {
+        state.store.invalidate_pump_baseline(garden, now).await?;
+    }
     Ok(())
 }
 

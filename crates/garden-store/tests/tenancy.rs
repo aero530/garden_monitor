@@ -547,3 +547,95 @@ async fn deleting_a_garden_takes_its_display_token_with_it() {
     store.delete_garden(garden.id).await.unwrap();
     assert_eq!(store.garden_for_display_token(&token).await.unwrap(), None);
 }
+
+#[tokio::test]
+async fn a_deep_clean_voids_the_pump_baseline_rather_than_setting_it() {
+    // The trap in the obvious implementation. At the moment a deep clean is ticked,
+    // every reading on record was taken while the lines were still fouled. Setting
+    // the reference from them would define "clean" as the state that prompted the
+    // clean, and the restriction would read 0% forever after — a diagnostic that can
+    // never fire again, which is worse than one that never fired at all.
+    use garden_store::pump::BaselineSource;
+
+    let store = fixture().await;
+    let phil = store
+        .create_user(email("phil@example.com"), "Phil", "a long enough password", t0())
+        .await
+        .unwrap();
+    let garden = store
+        .create_garden("Kitchen", DeviceModel::Studio2, "UTC", phil.id, t0())
+        .await
+        .unwrap();
+
+    assert_eq!(store.pump_baseline(garden.id).await.unwrap(), None);
+
+    store
+        .set_pump_baseline(garden.id, 400.0, BaselineSource::FirstReadings, t0())
+        .await
+        .unwrap();
+    let seeded = store.pump_baseline(garden.id).await.unwrap().unwrap();
+    assert_eq!(seeded.nominal_ma, Some(400.0));
+    assert_eq!(seeded.source, BaselineSource::FirstReadings);
+    assert_eq!(seeded.pending_since, None);
+
+    let cleaned = garden_core::time::add_days(t0(), 30.0);
+    store.invalidate_pump_baseline(garden.id, cleaned).await.unwrap();
+
+    let pending = store.pump_baseline(garden.id).await.unwrap().unwrap();
+    assert_eq!(pending.nominal_ma, None, "the old reference must be void");
+    assert_eq!(
+        pending.pending_since,
+        Some(cleaned),
+        "and the relearn window must start at the clean, not before it"
+    );
+    assert_eq!(pending.source, BaselineSource::AfterDeepClean);
+}
+
+#[tokio::test]
+async fn the_relearn_window_excludes_the_readings_that_prompted_the_clean() {
+    // The property the timestamp exists for, end to end through the query the
+    // dispatcher actually uses.
+    use garden_core::PumpBaseline;
+
+    let store = fixture().await;
+    let phil = store
+        .create_user(email("phil@example.com"), "Phil", "a long enough password", t0())
+        .await
+        .unwrap();
+    let garden = store
+        .create_garden("Kitchen", DeviceModel::Studio2, "UTC", phil.id, t0())
+        .await
+        .unwrap();
+
+    let mut at = t0();
+    let push = |ma: f32, at: jiff::Timestamp| {
+        let mut s = garden_core::SensorSnapshot::empty(at);
+        s.pump_current_ma = Some(ma);
+        s
+    };
+    // A fouled fortnight, then the clean, then a clear week.
+    for _ in 0..20 {
+        store.record_reading(garden.id, &push(600.0, at), None).await.unwrap();
+        at = garden_core::time::add_days(at, 0.5);
+    }
+    let cleaned = at;
+    for _ in 0..20 {
+        at = garden_core::time::add_days(at, 0.5);
+        store.record_reading(garden.id, &push(400.0, at), None).await.unwrap();
+    }
+
+    let (all, _) = store
+        .pump_running_stats(garden.id, t0(), PumpBaseline::RUNNING_MA)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!((all - 500.0).abs() < 1.0, "the whole history averages {all}");
+
+    let (after, samples) = store
+        .pump_running_stats(garden.id, cleaned, PumpBaseline::RUNNING_MA)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!((after - 400.0).abs() < 1.0, "after the clean it should be 400, got {after}");
+    assert!(samples >= PumpBaseline::MIN_BASELINE_SAMPLES);
+}

@@ -81,6 +81,13 @@ pub async fn build(
             // the newest reading. The newest reading is almost always a stopped pump
             // — four five-minute cycles a day — and reading 0 mA as a measurement of
             // restriction produced a dashboard confidently claiming -100%.
+            // The measured clean reference, or nothing. Nothing means the restriction
+            // percentage is simply not reported, which is the honest answer for a
+            // garden whose pump has never been measured with clear lines.
+            state.pump.nominal_ma = store
+                .pump_baseline(garden.id)
+                .await?
+                .and_then(|b| b.nominal_ma);
             state.pump.running_ma = store
                 .mean_pump_current_ma(
                     garden.id,

@@ -11,6 +11,7 @@ pub mod frames;
 pub mod gardens;
 pub mod notifications;
 pub mod plantings;
+pub mod pump;
 pub mod readings;
 pub mod schema;
 pub mod settings;

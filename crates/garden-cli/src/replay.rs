@@ -215,6 +215,10 @@ async fn state_at(
             // Same contract as the live path: the mean of samples that caught the
             // pump running, over the same window, so a replay and the dashboard
             // cannot disagree about whether the lines are clear.
+            state.pump.nominal_ma = store
+                .pump_baseline(garden)
+                .await?
+                .and_then(|b| b.nominal_ma);
             state.pump.running_ma = store
                 .mean_pump_current_ma(
                     garden,

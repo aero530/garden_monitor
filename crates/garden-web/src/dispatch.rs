@@ -58,6 +58,11 @@ async fn sweep_garden(
 ) -> Result<(), garden_store::StoreError> {
     // Refresh outstanding work first. The dispatcher must not notify from a stale
     // task list — that is how someone gets pinged about a tank they filled an hour ago.
+    // Establish the pump's clean reference if it is missing or still being relearned.
+    // Done here rather than in `state::build` because it is a write, and a page render
+    // should not change what it is rendering.
+    ensure_pump_baseline(state, garden.id, now).await?;
+
     let snapshot = crate::state::build(&state.store, garden, now).await?;
     let evaluation = garden_rules::default_engine().evaluate(&snapshot);
     state
@@ -115,6 +120,63 @@ async fn sweep_garden(
     }
     Ok(())
 }
+
+/// Learn the pump's clean-system draw when there is not one.
+///
+/// Two cases reach here. A garden that has never had a baseline gets one seeded from
+/// its earliest running readings — weaker than a post-clean measurement, and labelled
+/// as such, but it is the difference between a diagnostic that works today and one
+/// that waits for a deep clean that may be months away. A garden whose baseline was
+/// voided by a deep clean gets one from readings taken strictly after it.
+///
+/// Both wait for [`PumpBaseline::MIN_BASELINE_SAMPLES`]. The first reading of a pump
+/// cycle catches it priming and draws more than it will a minute later; freezing that
+/// in as "clean" would make every later comparison read low.
+async fn ensure_pump_baseline(
+    state: &AppState,
+    garden: garden_core::GardenId,
+    now: Timestamp,
+) -> Result<(), garden_store::StoreError> {
+    use garden_store::pump::BaselineSource;
+
+    let stored = state.store.pump_baseline(garden).await?;
+    if stored.as_ref().is_some_and(|b| b.nominal_ma.is_some()) {
+        return Ok(());
+    }
+
+    // Everything before the clean describes the system that needed cleaning.
+    let (since, source) = match stored.as_ref().and_then(|b| b.pending_since) {
+        Some(cleaned_at) => (cleaned_at, BaselineSource::AfterDeepClean),
+        None => (garden_core::time::add_days(now, -BASELINE_LOOKBACK_DAYS), BaselineSource::FirstReadings),
+    };
+
+    let Some((mean, samples)) = state
+        .store
+        .pump_running_stats(garden, since, garden_core::PumpBaseline::RUNNING_MA)
+        .await?
+    else {
+        return Ok(());
+    };
+    if samples < garden_core::PumpBaseline::MIN_BASELINE_SAMPLES {
+        return Ok(());
+    }
+
+    state.store.set_pump_baseline(garden, mean, source, now).await?;
+    tracing::info!(
+        %garden,
+        nominal_ma = mean,
+        samples,
+        source = source.slug(),
+        "pump clean-system baseline established"
+    );
+    Ok(())
+}
+
+/// How far back to look when seeding a first baseline.
+///
+/// Long enough to find a pump cycle on a garden whose agent reports intermittently,
+/// short enough that a reference is not built from a season-old state of the machine.
+const BASELINE_LOOKBACK_DAYS: f64 = 30.0;
 
 /// Most interrupting notifications one person may receive about one garden in a
 /// single sweep.

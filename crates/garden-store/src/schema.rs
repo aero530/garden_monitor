@@ -71,7 +71,31 @@ CREATE TABLE IF NOT EXISTS garden_mode (
     updated_at TEXT NOT NULL
 );
 
--- Read-only bearer secrets for counter displays.
+-- The pump's clean-system current draw, per garden.
+--
+-- `api.rs` has always claimed the brain keeps this "because the clean-system reference
+-- outlives any single agent run". It did not: there was nowhere to put it, so every
+-- evaluation rebuilt it from a hardcoded 400 mA placeholder and the restriction
+-- percentage measured distance from that number rather than fouling.
+--
+-- `nominal_ma` NULL with `pending_since` set is the state after a deep clean: the old
+-- reference is void and a new one is being learned. It must be learned from readings
+-- taken *after* the clean — rebaselining at the moment the task is ticked would
+-- capture the draw of a system that is still fouled and freeze that in as "clean",
+-- which is the exact failure this table exists to end.
+--
+-- `source` records which kind of reference it is, because they are not equally good:
+-- one taken after a deep clean is a real clean-system measurement, while one seeded
+-- from a new agent's first readings is only "however it was running when we met it".
+CREATE TABLE IF NOT EXISTS pump_baseline (
+    garden_id     TEXT PRIMARY KEY REFERENCES gardens(id) ON DELETE CASCADE,
+    nominal_ma    REAL,
+    source        TEXT NOT NULL,
+    pending_since TEXT,
+    set_at        TEXT NOT NULL
+);
+
+-- Read-only bearer secrets for displays.
 --
 -- Same shape as `notification_prefs.calendar_digest` and for the same reason: a device
 -- with no keyboard cannot hold a session, so it holds an unguessable URL instead. Only

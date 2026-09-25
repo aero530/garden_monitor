@@ -33,7 +33,13 @@ pub struct Simulation {
 impl Simulation {
     pub fn new(seed: u64, now: Timestamp) -> Self {
         Self {
-            state: GardenState::new_studio_2(now),
+            state: {
+                let mut s = GardenState::new_studio_2(now);
+                // The simulator knows its own hardware, so it starts with a reference
+                // a real garden has to earn.
+                s.pump = garden_core::PumpBaseline::new(physics::CLEAN_PUMP_MA);
+                s
+            },
             env: Environment::default(),
             plants: Vec::new(),
             fouling: Fouling::CLEAN,

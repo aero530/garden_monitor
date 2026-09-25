@@ -68,8 +68,18 @@ impl SensorSnapshot {
 /// roots" and "clean" from calendar entries into measured triggers.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PumpBaseline {
-    /// Draw recorded immediately after a deep clean, with clear lines.
-    pub nominal_ma: f32,
+    /// Draw recorded with clear lines, against which restriction is measured.
+    ///
+    /// `None` until one has been established. It used to be a hardcoded 400 mA whose
+    /// own comment called it a placeholder, and nothing ever replaced it: `rebaseline`
+    /// was called only by the simulator, and there was nowhere to persist a real one.
+    /// So "23% above its clean baseline" meant "23% away from a number someone typed
+    /// in", and a pump that simply drew 490 mA when spotless sat there forever.
+    ///
+    /// A reference that was never measured is not a reference, and reporting a
+    /// percentage against one is worse than reporting nothing: it looks like a
+    /// diagnostic.
+    pub nominal_ma: Option<f32>,
     /// Mean draw across recent samples **taken while the pump was running**.
     ///
     /// `None` until such a sample exists, which is the common state rather than an
@@ -89,10 +99,25 @@ pub struct PumpBaseline {
 impl PumpBaseline {
     pub fn new(nominal_ma: f32) -> Self {
         Self {
-            nominal_ma,
+            nominal_ma: Some(nominal_ma),
             running_ma: None,
         }
     }
+
+    /// A garden whose clean draw has never been measured.
+    pub const fn unknown() -> Self {
+        Self {
+            nominal_ma: None,
+            running_ma: None,
+        }
+    }
+
+    /// Fewest running samples worth setting a baseline from.
+    ///
+    /// The pump draws for five minutes at a time, so at one sample a minute this is
+    /// roughly a third of one cycle. Enough to average out the surge as it primes,
+    /// few enough that a baseline exists within a day of the agent starting.
+    pub const MIN_BASELINE_SAMPLES: i64 = 5;
 
     /// Draw below which the pump is considered stopped rather than unloaded.
     ///
@@ -107,10 +132,11 @@ impl PumpBaseline {
     /// no honest answer then — and a rule that reads one anyway stands down to its
     /// calendar fallback, which is exactly what should happen.
     pub fn restriction_ratio(&self) -> Option<f32> {
-        if self.nominal_ma <= 0.0 {
+        let nominal = self.nominal_ma?;
+        if nominal <= 0.0 {
             return None;
         }
-        Some(self.running_ma? / self.nominal_ma)
+        Some(self.running_ma? / nominal)
     }
 
     /// Fold a new reading into the running mean.
@@ -136,7 +162,7 @@ impl PumpBaseline {
     /// nothing would set `nominal_ma` from a pump that was off.
     pub fn rebaseline(&mut self) {
         if let Some(measured) = self.running_ma {
-            self.nominal_ma = measured;
+            self.nominal_ma = Some(measured);
         }
     }
 
@@ -180,6 +206,27 @@ mod tests {
         assert!(s.capabilities().contains(Capability::Conductivity));
         s.ec_ms_cm = None; // probe failure mid-season
         assert!(!s.capabilities().contains(Capability::Conductivity));
+    }
+
+    #[test]
+    fn a_pump_with_no_measured_reference_reports_nothing() {
+        // Half the fix. `running_ma` being unknown was handled; `nominal_ma` being
+        // unknown was not, because it was never unknown — it was a hardcoded 400 mA,
+        // so every garden reported a confident percentage against a number that had
+        // never been measured on any hardware.
+        let mut pump = PumpBaseline::unknown();
+        for _ in 0..50 {
+            pump.observe(520.0, 0.1);
+        }
+        assert_eq!(pump.running_ma, Some(520.0), "the draw is known");
+        assert_eq!(
+            pump.restriction_ratio(),
+            None,
+            "but there is nothing to compare it against"
+        );
+
+        pump.nominal_ma = Some(400.0);
+        assert!((pump.restriction_ratio().unwrap() - 1.3).abs() < 0.01);
     }
 
     #[test]
@@ -256,7 +303,7 @@ mod tests {
         // pin `nominal_ma` at nothing and make every later reading look catastrophic.
         let mut pump = PumpBaseline::new(400.0);
         pump.rebaseline();
-        assert_eq!(pump.nominal_ma, 400.0);
+        assert_eq!(pump.nominal_ma, Some(400.0));
     }
 
     #[test]

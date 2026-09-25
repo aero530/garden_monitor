@@ -168,8 +168,25 @@ impl Store {
         since: Timestamp,
         min_ma: f32,
     ) -> Result<Option<f32>> {
-        let row: Option<(Option<f64>,)> = sqlx::query_as(
-            "SELECT AVG(pump_current_ma) FROM readings
+        Ok(self
+            .pump_running_stats(garden, since, min_ma)
+            .await?
+            .map(|(mean, _)| mean))
+    }
+
+    /// The same mean, with the number of samples behind it.
+    ///
+    /// The count is what decides whether a baseline may be set. One reading taken as
+    /// the pump primes is not the draw of a running pump, and freezing that in as the
+    /// clean reference would skew every later comparison against it.
+    pub async fn pump_running_stats(
+        &self,
+        garden: GardenId,
+        since: Timestamp,
+        min_ma: f32,
+    ) -> Result<Option<(f32, i64)>> {
+        let row: Option<(Option<f64>, i64)> = sqlx::query_as(
+            "SELECT AVG(pump_current_ma), COUNT(pump_current_ma) FROM readings
              WHERE garden_id = ?1 AND at >= ?2 AND pump_current_ma >= ?3",
         )
         .bind(garden.to_string())
@@ -178,8 +195,8 @@ impl Store {
         .fetch_optional(&self.db)
         .await?;
         // AVG over no rows is SQL NULL, hence the doubled Option: a row always comes
-        // back, and its single column is what may be absent.
-        Ok(row.and_then(|(mean,)| mean).map(|m| m as f32))
+        // back, and its first column is what may be absent.
+        Ok(row.and_then(|(mean, n)| mean.map(|m| (m as f32, n))))
     }
 
     pub async fn fitted_consumption_lpd(

@@ -634,8 +634,9 @@ mod tests {
     #[test]
     fn persistent_fouling_calls_for_a_clean_long_before_the_year_is_up() {
         let mut g = garden(5.0);
+        g.pump.nominal_ma = Some(400.0);
         for _ in 0..300 {
-            g.pump.observe(600.0, 0.1); // 1.5x baseline
+            g.pump.observe(600.0, 0.1); // 1.5x
         }
         let tasks = clean_engine().evaluate(&g).tasks;
         assert_eq!(tasks.len(), 1);

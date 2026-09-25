@@ -297,8 +297,12 @@ mod tests {
     #[test]
     fn a_restricted_pump_fires_well_before_the_cadence_would() {
         let mut g = garden(Some(14.0)); // cadence alone would stay quiet
+        // Stated, not inherited. These used to lean on a hardcoded 400 mA default
+        // that no real garden ever had, which is how the restriction percentage came
+        // to be measured against a number nobody had measured.
+        g.pump.nominal_ma = Some(400.0);
         for _ in 0..300 {
-            g.pump.observe(500.0, 0.1); // 1.25x baseline
+            g.pump.observe(500.0, 0.1); // 1.25x
         }
         let tasks = both_rules().evaluate(&g).tasks;
         assert_eq!(tasks.len(), 1);
@@ -310,8 +314,9 @@ mod tests {
     #[test]
     fn severe_restriction_is_urgent_regardless_of_when_roots_were_last_checked() {
         let mut g = garden(Some(1.0));
+        g.pump.nominal_ma = Some(400.0);
         for _ in 0..300 {
-            g.pump.observe(600.0, 0.1); // 1.5x baseline
+            g.pump.observe(600.0, 0.1); // 1.5x
         }
         let tasks = both_rules().evaluate(&g).tasks;
         assert_eq!(tasks[0].severity, Severity::Urgent);
