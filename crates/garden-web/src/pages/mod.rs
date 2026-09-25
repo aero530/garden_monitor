@@ -9,6 +9,7 @@ pub mod guides;
 pub mod members;
 pub mod mode;
 pub mod notify;
+pub mod oled;
 pub mod slots;
 pub mod schedule;
 pub mod storage;

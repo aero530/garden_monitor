@@ -39,31 +39,7 @@ async fn apply(
 
     match action {
         TaskAction::Complete => {
-            state
-                .store
-                .complete_task(garden, key, actor.id(), now)
-                .await?;
-
-            // Close the loop with the plant itself.
-            //
-            // The rule engine is stateless and re-derives from stored state, so
-            // ticking "prune roots" has to move `last_root_check` or the identical
-            // task reappears on the next evaluation. Marking the task done without
-            // this would make completion look like it worked and then silently undo
-            // itself.
-            record_against_planting(state, garden, &task, now).await?;
-            record_against_tank(state, garden, &task, actor, now).await?;
-
-            state
-                .store
-                .log_event(
-                    garden,
-                    "task.completed",
-                    Some(&format!("{} — {}", task.kind, task.target)),
-                    Some(actor.id()),
-                    now,
-                )
-                .await?;
+            complete_and_close_the_loop(state, garden, &task, Some(actor.id()), now).await?;
         }
         TaskAction::Snooze => {
             state
@@ -112,6 +88,40 @@ async fn record_against_planting(
     Ok(())
 }
 
+/// Mark a task done and write back whatever the rules will re-read.
+///
+/// Shared with the counter display, which has a button and no session — hence
+/// `by: Option`. Everything else is identical on purpose: a task completed from a
+/// worktop must move the same state as one completed in a browser, or one of the two
+/// would silently undo itself on the next evaluation.
+///
+/// The rule engine is stateless and re-derives from stored state, so ticking "prune
+/// roots" has to move `last_root_check` or the identical task reappears. Marking the
+/// row done without this makes completion look like it worked for five minutes.
+pub(crate) async fn complete_and_close_the_loop(
+    state: &AppState,
+    garden: GardenId,
+    task: &garden_store::tasks::TaskRecord,
+    by: Option<garden_auth::UserId>,
+    now: jiff::Timestamp,
+) -> Result<(), AppError> {
+    state.store.complete_task(garden, &task.key, by, now).await?;
+    record_against_planting(state, garden, task, now).await?;
+    record_against_tank(state, garden, task, by, now).await?;
+
+    state
+        .store
+        .log_event(
+            garden,
+            "task.completed",
+            Some(&format!("{} — {}", task.kind, task.target)),
+            by,
+            now,
+        )
+        .await?;
+    Ok(())
+}
+
 /// Close the same loop for the tank.
 ///
 /// Feed, condition, refresh and deep clean are garden-level: they have no planting to
@@ -123,7 +133,7 @@ async fn record_against_tank(
     state: &AppState,
     garden: GardenId,
     task: &garden_store::tasks::TaskRecord,
-    actor: &Actor,
+    by: Option<garden_auth::UserId>,
     now: jiff::Timestamp,
 ) -> Result<(), AppError> {
     let Some(kind) = parse_task_kind(&task.kind) else {
@@ -141,10 +151,7 @@ async fn record_against_tank(
     let Some(event) = garden_core::TankEvent::for_task(kind, &geometry) else {
         return Ok(());
     };
-    state
-        .store
-        .record_tank_event(garden, event, Some(actor.id()), now)
-        .await?;
+    state.store.record_tank_event(garden, event, by, now).await?;
     Ok(())
 }
 

@@ -136,6 +136,7 @@ fn router(state: AppState) -> Router {
         .merge(pages::members::routes())
         .merge(pages::mode::routes())
         .merge(pages::notify::routes())
+        .merge(pages::oled::routes())
         .merge(pages::frames::routes())
         .merge(pages::slots::routes())
         .merge(pages::schedule::routes())

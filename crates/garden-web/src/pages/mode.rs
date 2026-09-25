@@ -180,6 +180,11 @@ fn display_card(garden: &Garden, has_token: bool, fresh: Option<&str>) -> Markup
                     }
                 }
             }
+            p.small style="margin:0.6rem 0 0" {
+                a href=(format!("/gardens/{}/display/preview", garden.id)) {
+                    "See what the screen will show →"
+                }
+            }
             @if has_token && fresh.is_none() {
                 p.small.muted style="margin:0.6rem 0 0" {
                     "An address exists. Only its digest is stored, so a lost one is "

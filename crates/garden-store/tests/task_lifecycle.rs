@@ -134,7 +134,7 @@ async fn completing_a_task_takes_it_off_the_list() {
         .await
         .unwrap();
 
-    store.complete_task(garden, &key, user, t0()).await.unwrap();
+    store.complete_task(garden, &key, Some(user), t0()).await.unwrap();
 
     let task = store.find_task(garden, &key).await.unwrap().unwrap();
     assert_eq!(task.state, TaskState::Done);
@@ -151,7 +151,7 @@ async fn a_completed_task_stays_quiet_inside_the_verification_window() {
         .sync_tasks(garden, &[water_task(t0(), Severity::Important)], t0())
         .await
         .unwrap();
-    store.complete_task(garden, &key, user, t0()).await.unwrap();
+    store.complete_task(garden, &key, Some(user), t0()).await.unwrap();
 
     let soon = add_days(t0(), minutes(VERIFY_WINDOW_MINUTES / 2.0));
     let outcome = store
@@ -175,7 +175,7 @@ async fn an_unverified_completion_reopens() {
         .sync_tasks(garden, &[water_task(t0(), Severity::Important)], t0())
         .await
         .unwrap();
-    store.complete_task(garden, &key, user, t0()).await.unwrap();
+    store.complete_task(garden, &key, Some(user), t0()).await.unwrap();
 
     let later = add_days(t0(), minutes(VERIFY_WINDOW_MINUTES + 5.0));
     let outcome = store
@@ -200,7 +200,7 @@ async fn a_verified_completion_does_not_come_back() {
         .sync_tasks(garden, &[water_task(t0(), Severity::Important)], t0())
         .await
         .unwrap();
-    store.complete_task(garden, &key, user, t0()).await.unwrap();
+    store.complete_task(garden, &key, Some(user), t0()).await.unwrap();
 
     let later = add_days(t0(), minutes(VERIFY_WINDOW_MINUTES + 5.0));
     store.sync_tasks(garden, &[], later).await.unwrap();

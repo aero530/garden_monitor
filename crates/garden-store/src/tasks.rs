@@ -276,11 +276,17 @@ impl Store {
         row.as_ref().map(record_from_row).transpose()
     }
 
+    /// Mark a task done.
+    ///
+    /// `by` is optional because not every completion is a person. A counter display's
+    /// button has no session and no user behind it, and attributing its presses to
+    /// whoever happens to own the garden would put a name against work they may not
+    /// have done. A null reads as "something closed this, not someone".
     pub async fn complete_task(
         &self,
         garden: GardenId,
         key: &TaskKey,
-        by: UserId,
+        by: Option<UserId>,
         now: Timestamp,
     ) -> Result<()> {
         sqlx::query(
@@ -289,7 +295,7 @@ impl Store {
              WHERE garden_id = ?3 AND task_key = ?4",
         )
         .bind(ts::encode(now))
-        .bind(by.to_string())
+        .bind(by.map(|u| u.to_string()))
         .bind(garden.to_string())
         .bind(&key.0)
         .execute(&self.db)
