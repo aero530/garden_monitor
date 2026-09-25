@@ -269,7 +269,17 @@ impl Rule for ConditionerRule {
             _ => false,
         };
 
-        let (severity, rationale) = if since > Self::MAX_GAP_DAYS {
+        let (severity, rationale) = if since.is_infinite() {
+            // No dose on record reads as infinitely overdue, which orders correctly and
+            // prints as "inf days since the last conditioner dose". The tank-refresh
+            // rule has handled this since it was written; this one did not, and it took
+            // a garden with no history at all — the ordinary state of a new simple-mode
+            // garden — to show it.
+            (
+                Severity::Advisory,
+                "no conditioner on record".to_string(),
+            )
+        } else if since > Self::MAX_GAP_DAYS {
             (
                 Severity::Advisory,
                 format!("{since:.0} days since the last conditioner dose"),
@@ -578,5 +588,42 @@ mod tests {
         assert_eq!(eval.tasks.len(), 1);
         assert_eq!(eval.tasks[0].severity, Severity::Important);
         assert!(eval.tasks[0].rationale.contains("algae"));
+    }
+}
+
+#[cfg(test)]
+mod infinity_tests {
+    use garden_core::{GardenState, Timestamp};
+
+    fn t0() -> Timestamp {
+        Timestamp::from_second(1_700_000_000).unwrap()
+    }
+
+    #[test]
+    fn no_rationale_ever_prints_an_infinity() {
+        // A garden with nothing on record is not exotic — it is every garden on its
+        // first day, and the ordinary state of a simple-mode one. `f64::INFINITY`
+        // orders correctly as "infinitely overdue" and formats as the literal text
+        // "inf", which reached an LCD before anyone noticed.
+        let mut state = GardenState::new_studio_2(t0());
+        state.mode = garden_core::GardenMode::Simple;
+        state.tank.volume_l = 2.0;
+        state.tank.consumption_lpd = 1.2;
+        state.tank.litres_added_since_food_dose = 8.0;
+        state.tank.last_top_off = Some(garden_core::time::add_days(t0(), -1.0));
+        state.sensors.water_level_mm = Some(300.0);
+
+        let evaluation = crate::default_engine().evaluate(&state);
+        assert!(!evaluation.tasks.is_empty(), "the fixture should raise something");
+        for task in &evaluation.tasks {
+            let text = format!("{} {}", task.rationale, task.detail.map(|d| d.to_string()).unwrap_or_default());
+            for bad in ["inf", "NaN"] {
+                assert!(
+                    !text.split_whitespace().any(|w| w.trim_matches(|c: char| !c.is_alphanumeric()) == bad),
+                    "'{}' printed a raw {bad}: {text}",
+                    task.kind
+                );
+            }
+        }
     }
 }

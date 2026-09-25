@@ -71,6 +71,22 @@ CREATE TABLE IF NOT EXISTS garden_mode (
     updated_at TEXT NOT NULL
 );
 
+-- Read-only bearer secrets for counter displays.
+--
+-- Same shape as `notification_prefs.calendar_digest` and for the same reason: a device
+-- with no keyboard cannot hold a session, so it holds an unguessable URL instead. Only
+-- the digest is stored, so a lost URL is re-issued rather than recovered — which is
+-- also how one is revoked.
+--
+-- Scoped to one garden and to reading. This is deliberately *not* the agent token: a
+-- display on a kitchen counter is the least physically secure thing in the system, and
+-- the blast radius of the sticker on its back should be "someone knows my tank is low".
+CREATE TABLE IF NOT EXISTS garden_display (
+    garden_id  TEXT PRIMARY KEY REFERENCES gardens(id) ON DELETE CASCADE,
+    digest     TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+
 -- The light and pump programme the Pi should be running, as a `garden_hal::Schedule`.
 --
 -- Handed to the agent on its next telemetry response, never pushed. The agent runs it

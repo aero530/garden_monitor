@@ -464,3 +464,86 @@ async fn events_stay_inside_their_own_garden() {
     assert_eq!(store.recent_events(kitchen.id, 10).await.unwrap().len(), 1);
     assert_eq!(store.recent_events(office.id, 10).await.unwrap().len(), 0);
 }
+
+#[tokio::test]
+async fn a_display_token_reads_one_garden_and_no_other() {
+    // The counter display's whole authorisation. It is a bearer secret on a device
+    // sitting in the open, so the only thing standing between a stolen sticker and
+    // someone else's garden is that this resolves to exactly one id.
+    let store = fixture().await;
+    let phil = store
+        .create_user(email("phil@example.com"), "Phil", "a long enough password", t0())
+        .await
+        .unwrap();
+    let sam = store
+        .create_user(email("sam@example.com"), "Sam", "a long enough password", t0())
+        .await
+        .unwrap();
+    let kitchen = store
+        .create_garden("Kitchen", DeviceModel::Studio2, "UTC", phil.id, t0())
+        .await
+        .unwrap();
+    let office = store
+        .create_garden("Office", DeviceModel::Studio2, "UTC", sam.id, t0())
+        .await
+        .unwrap();
+
+    let token = store.issue_display_token(kitchen.id, t0()).await.unwrap();
+    assert_eq!(
+        store.garden_for_display_token(&token).await.unwrap(),
+        Some(kitchen.id)
+    );
+    assert!(store.has_display_token(kitchen.id).await.unwrap());
+    assert!(
+        !store.has_display_token(office.id).await.unwrap(),
+        "minting one garden's token must not touch another's"
+    );
+
+    let forged = garden_auth::SecretToken::generate();
+    assert_eq!(store.garden_for_display_token(&forged).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn re_issuing_a_display_token_invalidates_the_one_it_replaces() {
+    // How a lost display is revoked: there is no list of devices, so replacing the
+    // secret is the only lever, and it has to actually cut the old one off.
+    let store = fixture().await;
+    let phil = store
+        .create_user(email("phil@example.com"), "Phil", "a long enough password", t0())
+        .await
+        .unwrap();
+    let garden = store
+        .create_garden("Kitchen", DeviceModel::Studio2, "UTC", phil.id, t0())
+        .await
+        .unwrap();
+
+    let first = store.issue_display_token(garden.id, t0()).await.unwrap();
+    let second = store.issue_display_token(garden.id, t0()).await.unwrap();
+
+    assert_eq!(store.garden_for_display_token(&first).await.unwrap(), None);
+    assert_eq!(
+        store.garden_for_display_token(&second).await.unwrap(),
+        Some(garden.id)
+    );
+
+    store.revoke_display_token(garden.id).await.unwrap();
+    assert_eq!(store.garden_for_display_token(&second).await.unwrap(), None);
+    assert!(!store.has_display_token(garden.id).await.unwrap());
+}
+
+#[tokio::test]
+async fn deleting_a_garden_takes_its_display_token_with_it() {
+    let store = fixture().await;
+    let phil = store
+        .create_user(email("phil@example.com"), "Phil", "a long enough password", t0())
+        .await
+        .unwrap();
+    let garden = store
+        .create_garden("Kitchen", DeviceModel::Studio2, "UTC", phil.id, t0())
+        .await
+        .unwrap();
+    let token = store.issue_display_token(garden.id, t0()).await.unwrap();
+
+    store.delete_garden(garden.id).await.unwrap();
+    assert_eq!(store.garden_for_display_token(&token).await.unwrap(), None);
+}

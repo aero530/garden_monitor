@@ -1,6 +1,7 @@
 //! Server-rendered pages.
 
 pub mod auth;
+pub mod display;
 pub mod fleet;
 pub mod frames;
 pub mod gardens;

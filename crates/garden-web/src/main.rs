@@ -142,6 +142,7 @@ fn router(state: AppState) -> Router {
         .merge(pages::storage::routes())
         .merge(pages::tasks::routes())
         .merge(pages::varieties::routes())
+        .merge(pages::display::routes())
         .merge(pages::fleet::routes())
         .merge(api::routes())
         .layer(TraceLayer::new_for_http())

@@ -1,7 +1,7 @@
 //! Gardens and their event log.
 
 use crate::{Result, Store, StoreError, ts};
-use garden_auth::{Membership, Role, UserId};
+use garden_auth::{Membership, Role, SecretToken, UserId};
 use garden_core::{DeviceModel, Garden, GardenId, GardenMode};
 use jiff::Timestamp;
 use sqlx::Row;
@@ -185,6 +185,63 @@ impl Store {
         .bind(ts::encode(now))
         .execute(&self.db)
         .await?;
+        Ok(())
+    }
+
+    /// Mint a display secret for a garden, replacing any existing one.
+    ///
+    /// Returned once. Re-issuing invalidates the previous URL, which is the only way
+    /// to revoke a device you no longer have.
+    pub async fn issue_display_token(
+        &self,
+        garden: GardenId,
+        now: Timestamp,
+    ) -> Result<SecretToken> {
+        let token = SecretToken::generate();
+        sqlx::query(
+            "INSERT INTO garden_display (garden_id, digest, created_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(garden_id) DO UPDATE SET digest = excluded.digest,
+                                                  created_at = excluded.created_at",
+        )
+        .bind(garden.to_string())
+        .bind(token.digest().as_str())
+        .bind(ts::encode(now))
+        .execute(&self.db)
+        .await?;
+        Ok(token)
+    }
+
+    /// Resolve a display URL back to the one garden it may read.
+    ///
+    /// The whole authorisation for that surface. Scoped to a single garden and to
+    /// reading, so a secret lifted off a device on a worktop cannot be aimed at
+    /// another garden or used to write anything.
+    pub async fn garden_for_display_token(&self, token: &SecretToken) -> Result<Option<GardenId>> {
+        let row = sqlx::query("SELECT garden_id FROM garden_display WHERE digest = ?1")
+            .bind(token.digest().as_str())
+            .fetch_optional(&self.db)
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        let raw: String = row.try_get("garden_id")?;
+        Ok(Some(GardenId(Uuid::parse_str(&raw).map_err(|e| {
+            StoreError::Corrupt(format!("garden id: {e}"))
+        })?)))
+    }
+
+    pub async fn has_display_token(&self, garden: GardenId) -> Result<bool> {
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM garden_display WHERE garden_id = ?1")
+                .bind(garden.to_string())
+                .fetch_optional(&self.db)
+                .await?;
+        Ok(row.is_some())
+    }
+
+    pub async fn revoke_display_token(&self, garden: GardenId) -> Result<()> {
+        sqlx::query("DELETE FROM garden_display WHERE garden_id = ?1")
+            .bind(garden.to_string())
+            .execute(&self.db)
+            .await?;
         Ok(())
     }
 

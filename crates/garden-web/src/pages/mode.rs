@@ -11,7 +11,7 @@
 use crate::app::{AppState, Auth};
 use crate::error::AppError;
 use crate::ui;
-use axum::extract::{Form, Path, State};
+use axum::extract::{Form, Path, Query, State};
 use axum::response::Redirect;
 use axum::{Router, routing::get, routing::post};
 use garden_auth::Permission;
@@ -23,6 +23,8 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/gardens/{id}/mode", get(page))
         .route("/gardens/{id}/mode", post(update))
+        .route("/gardens/{id}/mode/display", post(issue_display))
+        .route("/gardens/{id}/mode/display/revoke", post(revoke_display))
 }
 
 #[derive(Deserialize)]
@@ -36,13 +38,21 @@ async fn load(state: &AppState, actor: &garden_auth::Actor, id: &str) -> Result<
     state.store.find_garden(garden).await?.ok_or(AppError::NotFound)
 }
 
+#[derive(Deserialize, Default)]
+pub struct PageQuery {
+    /// The display URL, shown once immediately after minting it.
+    feed: Option<String>,
+}
+
 async fn page(
     State(state): State<AppState>,
     Auth(actor): Auth,
     Path(id): Path<String>,
+    Query(query): Query<PageQuery>,
 ) -> Result<Markup, AppError> {
     let garden = load(&state, &actor, &id).await?;
     let planted = state.store.active_plantings(garden.id).await?.len();
+    let has_display = state.store.has_display_token(garden.id).await?;
 
     Ok(ui::page(
         "Mode",
@@ -86,6 +96,8 @@ async fn page(
 
                 p { button.primary type="submit" { "Save" } }
             }
+
+            (display_card(&garden, has_display, query.feed.as_deref()))
 
             // The single most likely worry, answered where it is felt rather than in a
             // doc nobody opens.
@@ -135,6 +147,90 @@ fn choice(
             p.small.muted style="margin:0 0 0 1.6rem" { (caveat) }
         }
     }
+}
+
+/// Mint, show and revoke the counter display's URL.
+///
+/// Separated from the mode form so that saving a mode cannot mint a secret by
+/// accident, and so that the URL is shown exactly once — at the moment it is created,
+/// which is the only moment anyone is ready to copy it.
+fn display_card(garden: &Garden, has_token: bool, fresh: Option<&str>) -> Markup {
+    html! {
+        div.card {
+            h3 style="margin-top:0" { "Counter display" }
+            p.small.muted {
+                "A read-only address a small screen can poll for the garden-level work "
+                "outstanding. It carries no session and cannot change anything — it "
+                "reads this one garden and nothing else."
+            }
+            @if let Some(url) = fresh {
+                p.small { "Copy this now. It is shown once:" }
+                p.token { (url) }
+            }
+            div.row {
+                form method="post" action=(format!("/gardens/{}/mode/display", garden.id)) {
+                    button type="submit" {
+                        @if has_token { "Replace the address" } @else { "Create an address" }
+                    }
+                }
+                @if has_token {
+                    form method="post"
+                         action=(format!("/gardens/{}/mode/display/revoke", garden.id)) {
+                        button type="submit" { "Revoke" }
+                    }
+                }
+            }
+            @if has_token && fresh.is_none() {
+                p.small.muted style="margin:0.6rem 0 0" {
+                    "An address exists. Only its digest is stored, so a lost one is "
+                    "replaced rather than recovered — which also revokes the old one."
+                }
+            }
+        }
+    }
+}
+
+async fn issue_display(
+    State(state): State<AppState>,
+    Auth(actor): Auth,
+    Path(id): Path<String>,
+) -> Result<Redirect, AppError> {
+    let garden = load(&state, &actor, &id).await?;
+    let token = state.store.issue_display_token(garden.id, state.now()).await?;
+    let url = format!(
+        "{}/display/{}/status.json",
+        state.config.base_url,
+        token.expose()
+    );
+    Ok(Redirect::to(&format!(
+        "/gardens/{}/mode?feed={}",
+        garden.id,
+        urlencode(&url)
+    )))
+}
+
+async fn revoke_display(
+    State(state): State<AppState>,
+    Auth(actor): Auth,
+    Path(id): Path<String>,
+) -> Result<Redirect, AppError> {
+    let garden = load(&state, &actor, &id).await?;
+    state.store.revoke_display_token(garden.id).await?;
+    Ok(Redirect::to(&format!("/gardens/{}/mode", garden.id)))
+}
+
+/// Minimal percent-encoding for a query value.
+fn urlencode(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 async fn update(
