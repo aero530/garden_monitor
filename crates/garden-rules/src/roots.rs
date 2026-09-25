@@ -5,7 +5,7 @@
 //! clean baseline means the pump is working against a restriction, and root mass in
 //! the flow path is the usual cause.
 
-use crate::engine::{PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule};
+use crate::engine::{PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule, RuleScope};
 use garden_core::{
     Capability, DueWindow, GardenState, PumpBaseline, RuleId, Severity, Stage, Target, Task,
     TaskKind,
@@ -30,6 +30,41 @@ fn candidates(state: &GardenState) -> Vec<(&garden_core::Planting, f64)> {
         })
         .map(|(p, _)| (p, p.days_since_root_check(state.now)))
         .collect()
+}
+
+/// The same cadence, asked of the garden rather than of each plant.
+///
+/// Simple mode has no plantings to iterate, and the answer is a single timestamp:
+/// when the reservoir was last looked into. The severities and the wording are shared
+/// with the per-plant path deliberately — the job is identical, only the thing being
+/// counted differs, and two sets of thresholds would drift.
+fn garden_root_check(state: &GardenState, source: RuleId, urgent_after: f64) -> Vec<Task> {
+    let since = state
+        .tank
+        .last_root_check
+        .map_or(f64::INFINITY, |at| garden_core::time::days_between(at, state.now));
+
+    let severity = if since >= CHECK_LATE_DAYS {
+        Severity::Important
+    } else if since >= urgent_after {
+        Severity::Advisory
+    } else {
+        return Vec::new();
+    };
+    let rationale = if since.is_infinite() {
+        "roots have never been checked".to_string()
+    } else {
+        format!("{since:.0} days since the last root check")
+    };
+
+    vec![Task::new(
+        TaskKind::PruneRoots,
+        Target::Garden,
+        severity,
+        DueWindow::within_days(state.now, 3.0),
+        rationale,
+        source,
+    )]
 }
 
 fn task(
@@ -61,6 +96,10 @@ impl Rule for RootPruneCadenceRule {
         Self::ID
     }
 
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
+    }
+
     fn produces(&self) -> &'static [TaskKind] {
         &[TaskKind::PruneRoots]
     }
@@ -70,6 +109,9 @@ impl Rule for RootPruneCadenceRule {
     }
 
     fn evaluate(&self, state: &GardenState) -> Vec<Task> {
+        if !state.mode.tracks_plants() {
+            return garden_root_check(state, Self::ID, CHECK_DUE_DAYS);
+        }
         candidates(state)
             .into_iter()
             .filter_map(|(planting, since)| {
@@ -107,6 +149,10 @@ impl Rule for RootPruneByFlowRule {
         &[Capability::PumpCurrent]
     }
 
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
+    }
+
     fn produces(&self) -> &'static [TaskKind] {
         &[TaskKind::PruneRoots]
     }
@@ -137,6 +183,20 @@ impl Rule for RootPruneByFlowRule {
         let ratio = ratio.expect("restricted implies a measurement");
         let excess = (ratio - 1.0) * 100.0;
         let urgent = ratio >= PumpBaseline::URGENT_RATIO;
+
+        // Same early trigger, aimed at the tower. The pump measures the whole flow
+        // path, so a restriction it sees was never attributable to one plant anyway.
+        if !state.mode.tracks_plants() {
+            let mut tasks = garden_root_check(state, Self::ID, CHECK_RESTRICTED_DAYS);
+            for t in &mut tasks {
+                t.rationale =
+                    format!("pump drawing {excess:.0}% above its clean baseline — check the roots");
+                if urgent {
+                    t.severity = Severity::Urgent;
+                }
+            }
+            return tasks;
+        }
 
         candidates(state)
             .into_iter()

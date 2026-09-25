@@ -666,6 +666,52 @@ measurement.
 mid-season drops its capability, and the fallback rule resumes on the next tick. This
 is why they are not Cargo features.
 
+### 7.2 Garden mode — what the operator wants to be asked
+
+`GardenMode` sits beside the capability set and is filtered the same way, but answers a
+different question. Capabilities are what the device *can* know. The mode is what the
+person *wants to be asked about*.
+
+| | Simple | Advanced |
+|---|---|---|
+| Water, food, conditioner | ✅ | ✅ |
+| Tank refresh, deep clean | ✅ | ✅ |
+| Root check | ✅ garden-wide, on a cadence | ✅ per plant, from its age |
+| Harvest, thin, germination, pollination, replant | — | ✅ |
+| Record of what is in each slot | not kept | required |
+
+Every rule declares a `RuleScope`, with no default so a rule added later cannot inherit
+the wrong answer by saying nothing. Guessing it from `produces()` does not work:
+`PruneRoots` is per-plant when the plants are known and garden-wide when they are not,
+so one kind legitimately appears at both levels.
+
+**Why a flag rather than just "no plantings recorded".** Four garden-level rules
+short-circuit on an empty planting list, and they are right to: an idle tower does not
+want feeding, and busywork is what erodes trust in the reminders that matter. But a
+*full* tower whose owner has not written down what is in it wants feeding exactly as
+much as a tracked one — and the two are indistinguishable in the state. The flag
+settles which is meant, and `GardenState::is_tended()` is the one place that asks.
+
+Simple mode therefore assumes the garden is in use. It has no way to know otherwise,
+and being reminded to feed an empty tower is a smaller failure than never being
+reminded to feed a full one. Likewise, it feeds at full strength because it cannot read
+plant stages; a tray of fresh seedlings is set back by that and recovers, whereas a
+mature tower starved for a season does not.
+
+Suppressed per-plant rules are *reported* as suppressed, with the same machinery a
+missing probe uses. "Why am I not being told to harvest?" deserves an answer, and here
+the answer is a setting the operator can change.
+
+Switching modes never touches a planting. The record costs real effort to build, the
+switch is meant to be reversible, and the succession planner reads what has grown well
+here whichever mode the garden is in now.
+
+**Why this is the first step toward a counter display.** An ESP32 with a small LCD
+cannot render a sixteen-slot tower with per-plant harvest windows, and nobody wants it
+to. It wants a handful of garden-level facts with icons. Simple mode is exactly that
+set, decided by the same engine that drives the web UI, so the display needs no rules
+of its own — only a compact read of the outstanding garden-level tasks.
+
 ---
 
 ## 8. Rules catalog

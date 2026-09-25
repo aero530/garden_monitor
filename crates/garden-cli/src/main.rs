@@ -989,6 +989,7 @@ async fn replay_cmd(store: &Store, args: ReplayArgs) -> Fallible {
         store,
         garden,
         geometry_for(found.model),
+        found.mode,
         &garden_rules::default_engine(),
         from,
         now,

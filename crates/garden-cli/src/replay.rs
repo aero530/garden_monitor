@@ -76,10 +76,12 @@ impl Summary {
 /// Daily rather than every five minutes on purpose. The rules are re-entrant and
 /// mostly move on the scale of days; 288 evaluations per day would take 288 times as
 /// long to tell you the same thing.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     store: &Store,
     garden: GardenId,
     geometry: Geometry,
+    mode: garden_core::GardenMode,
     engine: &Engine,
     from: Timestamp,
     to: Timestamp,
@@ -97,7 +99,7 @@ pub async fn run(
             break;
         }
 
-        let state = state_at(store, garden, geometry, at, extra).await?;
+        let state = state_at(store, garden, geometry, mode, at, extra).await?;
         let evaluation = engine.evaluate(&state);
 
         let keys: Vec<String> = evaluation.tasks.iter().map(|t| t.key.0.clone()).collect();
@@ -153,16 +155,22 @@ pub async fn run(
 /// Deliberately a separate function from the web server's `state::build`, and
 /// deliberately not sharing it: that one always means *now* and takes shortcuts a
 /// replay must not, like using the newest reading regardless of age.
+#[allow(clippy::too_many_arguments)]
 async fn state_at(
     store: &Store,
     garden: GardenId,
     geometry: Geometry,
+    mode: garden_core::GardenMode,
     at: Timestamp,
     extra: &[Capability],
 ) -> garden_store::Result<GardenState> {
     let mut state = GardenState::for_garden(garden, at);
     state.geometry = geometry;
     state.tank_geometry = TankGeometry::STUDIO_2;
+    // The garden's mode as it stands now, not as it stood then — it is not versioned,
+    // and a replay is asked in order to see what the current configuration would have
+    // said about the past.
+    state.mode = mode;
 
     // Plantings as they were: planted by then, and not yet pulled.
     state.plantings = store
@@ -326,6 +334,7 @@ mod tests {
             &store,
             garden,
             Geometry::STUDIO_2,
+            garden_core::GardenMode::Advanced,
             &garden_rules::default_engine(),
             t0(),
             add_days(t0(), 30.0),
@@ -348,6 +357,7 @@ mod tests {
             &store,
             garden,
             Geometry::STUDIO_2,
+            garden_core::GardenMode::Advanced,
             &garden_rules::default_engine(),
             t0(),
             add_days(t0(), 80.0),
@@ -378,6 +388,7 @@ mod tests {
             &store,
             garden,
             Geometry::STUDIO_2,
+            garden_core::GardenMode::Advanced,
             &garden_rules::default_engine(),
             t0(),
             add_days(t0(), 5.0),
@@ -404,6 +415,7 @@ mod tests {
             &store,
             garden,
             Geometry::STUDIO_2,
+            garden_core::GardenMode::Advanced,
             &garden_rules::default_engine(),
             t0(),
             add_days(t0(), 60.0),
@@ -437,6 +449,7 @@ mod tests {
             &store,
             garden,
             Geometry::STUDIO_2,
+            garden_core::GardenMode::Advanced,
             &garden_rules::default_engine(),
             t0(),
             add_days(t0(), 60.0),
@@ -463,6 +476,7 @@ mod tests {
             &store,
             garden,
             Geometry::STUDIO_2,
+            garden_core::GardenMode::Advanced,
             &garden_rules::default_engine(),
             t0(),
             add_days(t0(), 2.0),
@@ -509,6 +523,7 @@ mod tests {
             &store,
             garden,
             Geometry::STUDIO_2,
+            garden_core::GardenMode::Advanced,
             &engine,
             add_days(t0(), 20.0),
             add_days(t0(), 21.0),
@@ -520,6 +535,7 @@ mod tests {
             &store,
             garden,
             Geometry::STUDIO_2,
+            garden_core::GardenMode::Advanced,
             &engine,
             add_days(t0(), 31.0),
             add_days(t0(), 32.0),
@@ -587,10 +603,10 @@ mod tests {
 
         let engine = garden_rules::default_engine();
         let window = (t0(), add_days(t0(), 60.0));
-        let without = run(&store, blind, Geometry::STUDIO_2, &engine, window.0, window.1, &[])
+        let without = run(&store, blind, Geometry::STUDIO_2, garden_core::GardenMode::Advanced, &engine, window.0, window.1, &[])
             .await
             .unwrap();
-        let with = run(&store, probed, Geometry::STUDIO_2, &engine, window.0, window.1, &[])
+        let with = run(&store, probed, Geometry::STUDIO_2, garden_core::GardenMode::Advanced, &engine, window.0, window.1, &[])
             .await
             .unwrap();
 
@@ -617,6 +633,7 @@ mod tests {
             &store,
             garden,
             Geometry::STUDIO_2,
+            garden_core::GardenMode::Advanced,
             &garden_rules::default_engine(),
             t0(),
             add_days(t0(), 60.0),
@@ -634,6 +651,7 @@ mod tests {
             &store,
             garden,
             Geometry::STUDIO_2,
+            garden_core::GardenMode::Advanced,
             &garden_rules::default_engine(),
             t0(),
             t0(),

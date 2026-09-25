@@ -5,7 +5,7 @@
 //! other, and each tags its task so two unrelated concerns about the same garden do
 //! not collapse onto one key.
 
-use crate::engine::Rule;
+use crate::engine::{Rule, RuleScope};
 use garden_core::{
     Capability, DueWindow, GardenState, RuleId, Severity, Target, Task, TaskKind,
 };
@@ -31,6 +31,10 @@ impl Rule for RootZoneTempRule {
 
     fn requires(&self) -> &'static [Capability] {
         &[Capability::WaterTemperature]
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
     }
 
     fn produces(&self) -> &'static [TaskKind] {
@@ -118,6 +122,10 @@ impl Rule for PhRule {
 
     fn requires(&self) -> &'static [Capability] {
         &[Capability::PotentialHydrogen]
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
     }
 
     fn produces(&self) -> &'static [TaskKind] {

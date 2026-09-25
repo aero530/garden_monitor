@@ -349,6 +349,7 @@ mod tests {
             id: GardenId::new(),
             name: "Kitchen".into(),
             model: garden_core::DeviceModel::Studio2,
+            mode: garden_core::GardenMode::Advanced,
             timezone: "UTC".into(),
             created_at: jiff::Timestamp::from_second(1_700_000_000).unwrap(),
         }

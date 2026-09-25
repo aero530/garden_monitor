@@ -6,7 +6,7 @@
 //! per-variety target. [`PlantFoodByEcRule`] deliberately keeps the volume logic as
 //! its own fallback path, because winning a `TaskKind` means owning every case of it.
 
-use crate::engine::{PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule};
+use crate::engine::{PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule, RuleScope};
 use garden_core::{
     Capability, DueWindow, GardenState, RuleId, Severity, Stage, Target, Task, TaskDetail, TaskKind,
 };
@@ -22,6 +22,15 @@ const URGENT_LITRES: f32 = 5.0;
 /// A garden of seedlings gets the reduced "sprout dose". Only once something is
 /// actually producing does the tank run at full strength.
 fn dose_fraction(state: &GardenState) -> f32 {
+    // Simple mode has no stages to read, so it feeds at full strength.
+    //
+    // The alternative is to feed nothing, and that is the worse error: a mature tower
+    // starved for a season fails badly, while a tray of seedlings given full-strength
+    // food is set back and recovers. The task's own wording carries the caveat, which
+    // is where someone who has just sown a fresh tower will actually see it.
+    if !state.mode.tracks_plants() {
+        return 1.0;
+    }
     let mut any = false;
     let mut any_past_seedling = false;
     let mut any_germinated = false;
@@ -65,6 +74,10 @@ impl PlantFoodByVolumeRule {
 impl Rule for PlantFoodByVolumeRule {
     fn id(&self) -> RuleId {
         Self::ID
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
     }
 
     fn produces(&self) -> &'static [TaskKind] {
@@ -154,6 +167,10 @@ impl Rule for PlantFoodByEcRule {
         &[Capability::Conductivity]
     }
 
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
+    }
+
     fn produces(&self) -> &'static [TaskKind] {
         &[TaskKind::AddPlantFood]
     }
@@ -231,12 +248,16 @@ impl Rule for ConditionerRule {
         Self::ID
     }
 
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
+    }
+
     fn produces(&self) -> &'static [TaskKind] {
         &[TaskKind::AddConditioner]
     }
 
     fn evaluate(&self, state: &GardenState) -> Vec<Task> {
-        if state.plantings.is_empty() {
+        if !state.is_tended() {
             return Vec::new();
         }
 
@@ -291,6 +312,10 @@ impl Rule for ConditionerByAlgaeRule {
 
     fn requires(&self) -> &'static [Capability] {
         &[Capability::CanopyMetrics]
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
     }
 
     fn produces(&self) -> &'static [TaskKind] {

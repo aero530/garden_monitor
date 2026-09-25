@@ -253,8 +253,10 @@ async fn detail(
                     }
                 }
                 div.spacer {}
-                a.button href=(format!("/gardens/{id}/slots")) {
-                    "Slots (" (snapshot.occupied_slots()) ")"
+                @if garden.mode.tracks_plants() {
+                    a.button href=(format!("/gardens/{id}/slots")) {
+                        "Slots (" (snapshot.occupied_slots()) ")"
+                    }
                 }
                 a.button href=(format!("/gardens/{id}/frames")) { "Camera" }
                 a.button href=(format!("/gardens/{id}/members")) {
@@ -265,6 +267,7 @@ async fn detail(
                 }
                 @if actor.can(garden.id, Permission::ConfigureGarden) {
                     a.button href=(format!("/gardens/{id}/storage")) { "Storage" }
+                    a.button href=(format!("/gardens/{id}/mode")) { (garden.mode.label()) }
                 }
             }
 
@@ -288,11 +291,14 @@ async fn detail(
             } @else {
                 div.card {
                     h3 { "No sensors reporting" }
-                    p.muted.small style="margin:0" {
-                        "Nothing is measuring this garden yet — the edge agent registers \
-                         itself the first time it runs. Everything below is worked out \
-                         from what you have planted and when, which is enough for \
-                         thinning, harvest timing, root checks and replanting."
+                    @if garden.mode.tracks_plants() {
+                        p.muted.small style="margin:0" {
+                            "Nothing is measuring this garden yet — the edge agent                              registers itself the first time it runs. Everything below is                              worked out from what you have planted and when, which is                              enough for thinning, harvest timing, root checks and                              replanting."
+                        }
+                    } @else {
+                        p.muted.small style="margin:0" {
+                            "Nothing is measuring this garden yet — the edge agent                              registers itself the first time it runs. Until then this                              garden is in simple mode with no telemetry, so only the                              calendar reminders can run: tank refreshes, deep cleans and                              root checks."
+                        }
                     }
                 }
             }
@@ -305,12 +311,14 @@ async fn detail(
                 (task_card(task, id, can_act, now))
             }
 
-            div.row style="margin-top:2rem" {
-                h2 style="margin:0" { "Slots" }
-                div.spacer {}
-                a.small href=(format!("/gardens/{id}/slots")) { "manage" }
+            @if garden.mode.tracks_plants() {
+                div.row style="margin-top:2rem" {
+                    h2 style="margin:0" { "Slots" }
+                    div.spacer {}
+                    a.small href=(format!("/gardens/{id}/slots")) { "manage" }
+                }
+                (slots(&snapshot))
             }
-            (slots(&snapshot))
 
             @if !components.is_empty() {
                 h2 { "Hardware" }

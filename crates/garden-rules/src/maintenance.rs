@@ -15,7 +15,7 @@
 //! The Studio 2's sealed "No-Clean Columns" suppress the buildup that drives cleaning
 //! on older models, which is why that backstop is loose.
 
-use crate::engine::{PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule};
+use crate::engine::{PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule, RuleScope};
 use garden_core::{
     Capability, DueWindow, GardenState, PumpBaseline, RuleId, Severity, Target, Task, TaskKind,
 };
@@ -63,7 +63,10 @@ impl TankRefreshRule {
     fn calendar(state: &GardenState) -> Option<(Severity, String)> {
         // An idle device needs no maintenance. Draining a tank with nothing growing in
         // it is busywork, and busywork is what erodes trust in the reminders that matter.
-        if state.plantings.is_empty() {
+        //
+        // `is_tended` rather than a planting count, because in simple mode nobody
+        // records plantings and a full tower would otherwise read as an idle one.
+        if !state.is_tended() {
             return None;
         }
 
@@ -142,6 +145,10 @@ impl Rule for TankRefreshRule {
         Self::ID
     }
 
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
+    }
+
     fn produces(&self) -> &'static [TaskKind] {
         &[TaskKind::TankRefresh]
     }
@@ -205,6 +212,10 @@ impl Rule for TankRefreshByChlorosisRule {
         &[Capability::CanopyMetrics]
     }
 
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
+    }
+
     fn produces(&self) -> &'static [TaskKind] {
         &[TaskKind::TankRefresh]
     }
@@ -214,7 +225,7 @@ impl Rule for TankRefreshByChlorosisRule {
     }
 
     fn evaluate(&self, state: &GardenState) -> Vec<Task> {
-        if state.plantings.is_empty() {
+        if !state.is_tended() {
             return Vec::new();
         }
         let since = state.tank.days_since_refresh(state.now);
@@ -265,7 +276,9 @@ impl DeepCleanByCalendarRule {
     fn calendar(state: &GardenState) -> Option<(Severity, String)> {
         // An idle device needs no maintenance. Cleaning nothing is busywork, and
         // busywork is what erodes trust in the notifications that do matter.
-        if state.plantings.is_empty() {
+        //
+        // `is_tended` rather than a planting count: see the tank-refresh rule above.
+        if !state.is_tended() {
             return None;
         }
         let since = state.tank.days_since_deep_clean(state.now);
@@ -292,6 +305,10 @@ impl DeepCleanByCalendarRule {
 impl Rule for DeepCleanByCalendarRule {
     fn id(&self) -> RuleId {
         Self::ID
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
     }
 
     fn produces(&self) -> &'static [TaskKind] {
@@ -334,6 +351,10 @@ impl Rule for DeepCleanByFoulingRule {
         &[Capability::PumpCurrent]
     }
 
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
+    }
+
     fn produces(&self) -> &'static [TaskKind] {
         &[TaskKind::DeepClean]
     }
@@ -343,7 +364,7 @@ impl Rule for DeepCleanByFoulingRule {
     }
 
     fn evaluate(&self, state: &GardenState) -> Vec<Task> {
-        if state.plantings.is_empty() {
+        if !state.is_tended() {
             return Vec::new();
         }
         // Unmeasured falls through to the calendar below, same as unrestricted. A

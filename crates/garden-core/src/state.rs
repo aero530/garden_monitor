@@ -5,7 +5,7 @@
 //! rule to see what it *would* have said.
 
 use crate::capability::CapabilitySet;
-use crate::garden::GardenId;
+use crate::garden::{GardenId, GardenMode};
 use crate::planting::Planting;
 use crate::sensors::{PumpBaseline, SensorSnapshot};
 use crate::slot::{Geometry, SlotId};
@@ -29,6 +29,12 @@ pub struct GardenState {
     pub dosing: DosingSpec,
     /// What the garden can currently sense and control. Rules are filtered against this.
     pub capabilities: CapabilitySet,
+    /// How much of the garden the operator has asked to be told about.
+    ///
+    /// Sits beside `capabilities` and is filtered the same way, but answers a
+    /// different question: capabilities are what the device *can* know, this is what
+    /// the person *wants* to be asked about.
+    pub mode: GardenMode,
     pub varieties: VarietyBook,
     pub plantings: Vec<Planting>,
     pub tank: TankState,
@@ -59,6 +65,7 @@ impl GardenState {
             plantings: Vec::new(),
             tank: TankState::new(tank_geometry.capacity_l),
             sensors: SensorSnapshot::empty(now),
+            mode: GardenMode::default(),
             pump: PumpBaseline::new(Self::NOMINAL_PUMP_MA),
             slot_metrics: BTreeMap::new(),
             algae: None,
@@ -67,6 +74,21 @@ impl GardenState {
 
     /// Placeholder clean-system pump draw; re-baselined from the real device in Phase 1.
     const NOMINAL_PUMP_MA: f32 = 400.0;
+
+    /// Whether there is anything in the garden worth tending.
+    ///
+    /// The question every garden-level rule actually wants to ask. It used to be
+    /// spelled `!plantings.is_empty()`, which is right for a tracked garden and
+    /// exactly wrong for an untracked one: in simple mode nobody records plantings,
+    /// so an occupied tower reads as an empty one and the tank rules all fall silent
+    /// — the opposite of what simple mode is for.
+    ///
+    /// Simple mode therefore assumes the garden is in use. It has no way to know
+    /// otherwise, and being reminded to feed an empty tower is a smaller failure than
+    /// never being reminded to feed a full one.
+    pub fn is_tended(&self) -> bool {
+        !self.mode.tracks_plants() || !self.plantings.is_empty()
+    }
 
     pub fn active_plantings(&self) -> impl Iterator<Item = &Planting> {
         self.plantings.iter().filter(|p| p.is_active())

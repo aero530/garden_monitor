@@ -55,6 +55,22 @@ CREATE TABLE IF NOT EXISTS garden_settings (
     updated_at           TEXT NOT NULL
 );
 
+-- How much of the garden the operator wants to track. See `garden_core::GardenMode`.
+--
+-- Its own table rather than a column on `garden_settings`, for the reason written
+-- above that table: the schema is applied idempotently and SQLite has no ADD COLUMN
+-- IF NOT EXISTS, so a new column reaches new databases and silently misses every
+-- existing one.
+--
+-- **No row means advanced**, which is what every garden that predates this was
+-- already doing. A mode is written only when someone chooses one, so an upgrade
+-- changes nothing about what anyone is told.
+CREATE TABLE IF NOT EXISTS garden_mode (
+    garden_id  TEXT PRIMARY KEY REFERENCES gardens(id) ON DELETE CASCADE,
+    mode       TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- The light and pump programme the Pi should be running, as a `garden_hal::Schedule`.
 --
 -- Handed to the agent on its next telemetry response, never pushed. The agent runs it

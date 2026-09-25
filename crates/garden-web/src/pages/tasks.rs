@@ -129,6 +129,14 @@ async fn record_against_tank(
     let Some(kind) = parse_task_kind(&task.kind) else {
         return Ok(());
     };
+    // A task aimed at one plant never writes the garden's own history. This matters
+    // for root checks, which exist at both levels: pruning planting 7's roots says
+    // something about planting 7, while simple mode's check is aimed at the tower and
+    // lands here. Written as a guard on the target rather than on the kind, so a
+    // future two-level kind cannot quietly get this wrong.
+    if planting_target(&task.target).is_some() {
+        return Ok(());
+    }
     let geometry = garden_core::TankGeometry::STUDIO_2;
     let Some(event) = garden_core::TankEvent::for_task(kind, &geometry) else {
         return Ok(());

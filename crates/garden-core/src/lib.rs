@@ -23,7 +23,7 @@ pub mod variety;
 pub mod vision;
 
 pub use capability::{Capability, CapabilitySet};
-pub use garden::{CameraRotation, DeviceModel, Garden, GardenId};
+pub use garden::{CameraRotation, DeviceModel, Garden, GardenId, GardenMode};
 pub use guide::{Guide, GuideBook, GuideSection};
 pub use planting::{Planting, PlantingId, Stage};
 pub use sensors::{PumpBaseline, SensorSnapshot, ewma};

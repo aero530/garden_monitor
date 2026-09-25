@@ -4,7 +4,7 @@
 //! Real growth runs ahead or behind the book depending on slot position, light, and
 //! solution strength, so when vision is enabled it should lead.
 
-use crate::engine::{PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule};
+use crate::engine::{PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule, RuleScope};
 use garden_core::{
     Capability, DueWindow, GardenState, Planting, RuleId, Severity, Stage, Target, Task, TaskKind,
     Variety,
@@ -88,6 +88,10 @@ impl Rule for HarvestByCalendarRule {
         Self::ID
     }
 
+    fn scope(&self) -> RuleScope {
+        RuleScope::Plant
+    }
+
     fn produces(&self) -> &'static [TaskKind] {
         &[TaskKind::Harvest]
     }
@@ -119,6 +123,10 @@ impl Rule for HarvestByCanopyRule {
 
     fn requires(&self) -> &'static [Capability] {
         &[Capability::CanopyMetrics]
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Plant
     }
 
     fn produces(&self) -> &'static [TaskKind] {
@@ -185,6 +193,10 @@ impl ReplantRule {
 impl Rule for ReplantRule {
     fn id(&self) -> RuleId {
         Self::ID
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Plant
     }
 
     fn produces(&self) -> &'static [TaskKind] {

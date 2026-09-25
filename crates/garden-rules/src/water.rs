@@ -1,6 +1,6 @@
 //! Water level: forecasting a refill before the tank runs dry.
 
-use crate::engine::{PRECEDENCE_FALLBACK, Rule};
+use crate::engine::{PRECEDENCE_FALLBACK, Rule, RuleScope};
 use garden_core::{
     Capability, DueWindow, GardenState, RuleId, Severity, Target, Task, TaskDetail, TaskKind,
     time::add_days,
@@ -37,6 +37,10 @@ impl Rule for WaterLevelRule {
 
     fn requires(&self) -> &'static [Capability] {
         &[Capability::WaterLevel]
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Garden
     }
 
     fn produces(&self) -> &'static [TaskKind] {

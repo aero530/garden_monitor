@@ -38,6 +38,10 @@ pub async fn build(
     let mut state = GardenState::for_garden(garden.id, now);
     state.geometry = geometry_for(garden.model);
     state.tank_geometry = TankGeometry::STUDIO_2;
+    state.mode = garden.mode;
+    // Loaded in both modes. Simple mode does not *ask* about them, and a garden that
+    // was tracked before the switch still has them — the succession planner reads
+    // that history, and switching back must find everything where it was left.
     state.plantings = store.active_plantings(garden.id).await?;
 
     if garden.model == DeviceModel::Simulated {

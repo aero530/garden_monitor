@@ -6,6 +6,7 @@ pub mod frames;
 pub mod gardens;
 pub mod guides;
 pub mod members;
+pub mod mode;
 pub mod notify;
 pub mod slots;
 pub mod schedule;

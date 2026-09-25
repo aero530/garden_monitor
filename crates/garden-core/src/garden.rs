@@ -149,6 +149,57 @@ impl fmt::Display for DeviceModel {
     }
 }
 
+/// How much of the garden the operator wants to keep track of.
+///
+/// Not a feature switch and not a capability: both modes run the same engine over the
+/// same state. What differs is whether per-plant work is *asked for*, and that is a
+/// question about the person rather than about the hardware — which is why it sits
+/// here and not in [`crate::CapabilitySet`].
+///
+/// The distinction earns its place because a garden with no plantings recorded is
+/// ambiguous without it. Four garden-level rules short-circuit on an empty planting
+/// list, correctly: an empty tower does not want feeding. A *full* tower whose owner
+/// has not written down what is in it wants feeding exactly as much as a tracked one,
+/// and looks identical in the state. One flag settles which is meant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum GardenMode {
+    /// Everything: per-plant harvest windows, thinning, germination, succession.
+    #[default]
+    Advanced,
+    /// The garden as a single thing. Water, food, conditioner, root checks, tank
+    /// refreshes and deep cleans — no record of what is in which slot.
+    Simple,
+}
+
+impl GardenMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            GardenMode::Advanced => "Advanced",
+            GardenMode::Simple => "Simple",
+        }
+    }
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            GardenMode::Advanced => "advanced",
+            GardenMode::Simple => "simple",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "advanced" => Some(GardenMode::Advanced),
+            "simple" => Some(GardenMode::Simple),
+            _ => None,
+        }
+    }
+
+    /// Whether per-plant work is tracked at all.
+    pub fn tracks_plants(self) -> bool {
+        matches!(self, GardenMode::Advanced)
+    }
+}
+
 /// A garden as the operator thinks of it: a named device in a place.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Garden {
@@ -157,6 +208,8 @@ pub struct Garden {
     /// "kitchen" and "office", not by serial number.
     pub name: String,
     pub model: DeviceModel,
+    /// How much of it the operator wants to track. See [`GardenMode`].
+    pub mode: GardenMode,
     /// IANA timezone. Quiet hours and the daily brief are meaningless without it, and
     /// two gardens on one account can legitimately be in different zones.
     pub timezone: String,
@@ -169,6 +222,7 @@ impl Garden {
             id: GardenId::new(),
             name: name.into(),
             model,
+            mode: GardenMode::default(),
             timezone: "UTC".to_string(),
             created_at,
         }

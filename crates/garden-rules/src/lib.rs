@@ -18,7 +18,7 @@ pub mod water;
 pub use succession::{Suggestion, suggest};
 
 pub use engine::{
-    Engine, Evaluation, PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule, Suppression,
+    Engine, Evaluation, PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule, RuleScope, Suppression,
     SuppressionReason,
 };
 
@@ -85,8 +85,8 @@ pub fn default_engine() -> Engine {
 mod tests {
     use super::*;
     use garden_core::{
-        Capability, CapabilitySet, GardenState, Planting, PlantingId, SlotId, Timestamp, VarietyId,
-        time::add_days,
+        Capability, CapabilitySet, GardenState, Planting, PlantingId, SlotId, TaskKind, Timestamp,
+        VarietyId, time::add_days,
     };
 
     fn t0() -> Timestamp {
@@ -115,6 +115,117 @@ mod tests {
         g.tank.last_top_off = Some(add_days(t0(), -1.0));
         g.sensors.water_level_mm = Some(300.0);
         g
+    }
+
+    /// The same neglect, by someone who keeps no record of what is planted.
+    fn neglected_untracked() -> GardenState {
+        let mut g = neglected();
+        g.mode = garden_core::GardenMode::Simple;
+        // The point of the mode: nobody writes these down.
+        g.plantings.clear();
+        g
+    }
+
+    #[test]
+    fn simple_mode_still_asks_for_everything_that_keeps_a_garden_alive() {
+        // The whole feature in one assertion. Every one of these used to fall silent
+        // on a garden with no plantings recorded, which is the state simple mode is
+        // permanently in — four rules short-circuit on an empty planting list, and
+        // root checks are per-plant.
+        let evaluation = default_engine().evaluate(&neglected_untracked());
+
+        for kind in [
+            TaskKind::AddWater,
+            TaskKind::AddPlantFood,
+            TaskKind::AddConditioner,
+            TaskKind::PruneRoots,
+            TaskKind::TankRefresh,
+            TaskKind::DeepClean,
+        ] {
+            assert!(
+                evaluation.has(kind),
+                "simple mode dropped '{kind}': {:?}",
+                evaluation.tasks.iter().map(|t| t.kind).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn simple_mode_asks_nothing_about_individual_plants() {
+        let evaluation = default_engine().evaluate(&neglected_untracked());
+        for task in &evaluation.tasks {
+            assert_eq!(
+                task.target,
+                garden_core::Target::Garden,
+                "'{}' is aimed at {} — simple mode has no plants to aim at",
+                task.kind,
+                task.target
+            );
+        }
+        for kind in [TaskKind::Harvest, TaskKind::Thin, TaskKind::Pollinate] {
+            assert!(!evaluation.has(kind), "simple mode should not raise '{kind}'");
+        }
+    }
+
+    #[test]
+    fn a_rule_held_back_by_the_mode_says_so_rather_than_vanishing() {
+        // "Why am I not being told to harvest?" has an answer, and it is a setting
+        // the operator can change. Same contract as a missing probe.
+        let evaluation = default_engine().evaluate(&neglected_untracked());
+        let explained: Vec<String> = evaluation
+            .suppressed
+            .iter()
+            .filter(|s| s.reason == SuppressionReason::PlantLevel)
+            .map(|s| s.explain())
+            .collect();
+
+        assert_eq!(explained.len(), 9, "every per-plant rule should account for itself");
+        assert!(explained.iter().all(|e| e.contains("simple mode")), "{explained:?}");
+    }
+
+    #[test]
+    fn an_empty_advanced_garden_is_still_left_alone() {
+        // The behaviour simple mode must not cost us. An operator who tracks plants
+        // and has pulled them all wants silence, not a reminder to feed bare water —
+        // and that is exactly what an untracked garden looks like from the state.
+        let mut g = neglected();
+        g.plantings.clear();
+        let evaluation = default_engine().evaluate(&g);
+
+        assert!(!evaluation.has(TaskKind::AddPlantFood));
+        assert!(!evaluation.has(TaskKind::TankRefresh));
+        assert!(!evaluation.has(TaskKind::DeepClean));
+    }
+
+    #[test]
+    fn switching_modes_changes_what_is_asked_and_nothing_else() {
+        // Both evaluations read the same plantings: the mode decides what is asked
+        // about them, and a switch never edits the record.
+        let mut tracked = neglected();
+        let before = tracked.plantings.clone();
+
+        let advanced = default_engine().evaluate(&tracked);
+        tracked.mode = garden_core::GardenMode::Simple;
+        let simple = default_engine().evaluate(&tracked);
+
+        assert_eq!(tracked.plantings, before, "evaluation must not mutate plantings");
+        assert!(advanced.has(TaskKind::Harvest), "100-day kale is overdue");
+        assert!(!simple.has(TaskKind::Harvest));
+        // And the garden-level work survives the switch untouched.
+        assert!(advanced.has(TaskKind::AddWater) && simple.has(TaskKind::AddWater));
+    }
+
+    #[test]
+    fn the_garden_level_root_check_follows_the_same_cadence_as_the_per_plant_one() {
+        let mut g = neglected_untracked();
+        g.tank.last_root_check = Some(add_days(t0(), -2.0));
+        assert!(
+            !default_engine().evaluate(&g).has(TaskKind::PruneRoots),
+            "roots checked two days ago need no attention"
+        );
+
+        g.tank.last_root_check = Some(add_days(t0(), -30.0));
+        assert!(default_engine().evaluate(&g).has(TaskKind::PruneRoots));
     }
 
     #[test]

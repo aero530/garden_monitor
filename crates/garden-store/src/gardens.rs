@@ -2,7 +2,7 @@
 
 use crate::{Result, Store, StoreError, ts};
 use garden_auth::{Membership, Role, UserId};
-use garden_core::{DeviceModel, Garden, GardenId};
+use garden_core::{DeviceModel, Garden, GardenId, GardenMode};
 use jiff::Timestamp;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
@@ -38,6 +38,16 @@ fn garden_from_row(row: &SqliteRow) -> Result<Garden> {
         ),
         name: row.try_get("name")?,
         model: model_from_str(&model)?,
+        // Absent column or absent row both mean advanced: a query that did not ask
+        // for the mode, or a garden that has never chosen one. Anything unrecognised
+        // means the same, because being told too much is recoverable and being told
+        // nothing is what this whole flag exists to prevent.
+        mode: row
+            .try_get::<Option<String>, _>("mode")
+            .ok()
+            .flatten()
+            .and_then(|m| GardenMode::parse(&m))
+            .unwrap_or_default(),
         timezone: row.try_get("timezone")?,
         created_at: ts::decode(&row.try_get::<String, _>("created_at")?)?,
     })
@@ -89,6 +99,7 @@ impl Store {
             id: GardenId::new(),
             name: name.trim().to_string(),
             model,
+            mode: GardenMode::default(),
             timezone: timezone.to_string(),
             created_at: now,
         };
@@ -127,14 +138,22 @@ impl Store {
     /// Deliberately not membership-scoped: the dispatcher acts on behalf of the
     /// system, then filters per member. Nothing user-facing calls this.
     pub async fn all_gardens(&self) -> Result<Vec<Garden>> {
-        let rows = sqlx::query("SELECT * FROM gardens ORDER BY created_at")
+        let rows = sqlx::query(
+            "SELECT g.*, m.mode FROM gardens g
+             LEFT JOIN garden_mode m ON m.garden_id = g.id
+             ORDER BY g.created_at",
+        )
             .fetch_all(&self.db)
             .await?;
         rows.iter().map(garden_from_row).collect()
     }
 
     pub async fn find_garden(&self, id: GardenId) -> Result<Option<Garden>> {
-        let row = sqlx::query("SELECT * FROM gardens WHERE id = ?1")
+        let row = sqlx::query(
+            "SELECT g.*, m.mode FROM gardens g
+             LEFT JOIN garden_mode m ON m.garden_id = g.id
+             WHERE g.id = ?1",
+        )
             .bind(id.to_string())
             .fetch_optional(&self.db)
             .await?;
@@ -145,12 +164,37 @@ impl Store {
     ///
     /// Driven by the membership join rather than by a caller-supplied list of ids, so
     /// there is no path by which a garden without a membership row appears here.
+    /// Choose how much of a garden to track.
+    ///
+    /// Writes nothing else. Switching to simple mode must never touch the plantings:
+    /// they cost real effort to record, the switch is meant to be reversible, and the
+    /// succession planner reads the history of what grew well here whichever mode the
+    /// garden is in now.
+    pub async fn set_garden_mode(
+        &self,
+        garden: GardenId,
+        mode: GardenMode,
+        now: Timestamp,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO garden_mode (garden_id, mode, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(garden_id) DO UPDATE SET mode = ?2, updated_at = ?3",
+        )
+        .bind(garden.to_string())
+        .bind(mode.slug())
+        .bind(ts::encode(now))
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
     pub async fn gardens_for_user(&self, user: UserId) -> Result<Vec<GardenListing>> {
         let rows = sqlx::query(
-            "SELECT g.*, m.role AS m_role,
+            "SELECT g.*, m.role AS m_role, gm.mode,
                     (SELECT COUNT(*) FROM memberships x WHERE x.garden_id = g.id) AS member_count
              FROM memberships m
              JOIN gardens g ON g.id = m.garden_id
+             LEFT JOIN garden_mode gm ON gm.garden_id = g.id
              WHERE m.user_id = ?1",
         )
         .bind(user.to_string())

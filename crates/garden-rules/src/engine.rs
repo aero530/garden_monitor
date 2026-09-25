@@ -40,11 +40,29 @@ pub trait Rule: Send + Sync {
     /// Which task kinds this rule can emit. Used to resolve precedence.
     fn produces(&self) -> &'static [TaskKind];
 
+    /// Which level of the garden this rule speaks about.
+    ///
+    /// Deliberately without a default, so a rule added later cannot inherit the wrong
+    /// answer by saying nothing. Guessing it from [`Rule::produces`] does not work
+    /// either: `PruneRoots` is per-plant when the plants are known and garden-wide
+    /// when they are not, so the same kind legitimately appears at both levels.
+    fn scope(&self) -> RuleScope;
+
     fn precedence(&self) -> u8 {
         PRECEDENCE_FALLBACK
     }
 
     fn evaluate(&self, state: &GardenState) -> Vec<Task>;
+}
+
+/// Whether a rule reasons about the whole garden or about individual plants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleScope {
+    /// Water, nutrients, the tank, the pump — true of the device as a whole.
+    Garden,
+    /// Harvest windows, thinning, germination, pollination: meaningless without a
+    /// record of what is in which slot.
+    Plant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +71,9 @@ pub enum SuppressionReason {
     MissingCapabilities(Vec<Capability>),
     /// A better-informed rule owns this task kind.
     Outranked { kind: TaskKind, by: RuleId },
+    /// The garden is in simple mode, and this rule only has something to say about
+    /// individual plants.
+    PlantLevel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +92,9 @@ impl Suppression {
             }
             SuppressionReason::Outranked { kind, by } => {
                 format!("{} superseded by {} for '{}'", self.rule, by, kind)
+            }
+            SuppressionReason::PlantLevel => {
+                format!("{} is per-plant, and this garden is in simple mode", self.rule)
             }
         }
     }
@@ -116,9 +140,21 @@ impl Engine {
     pub fn evaluate(&self, state: &GardenState) -> Evaluation {
         let mut suppressed = Vec::new();
 
-        // 1. Drop rules whose hardware or vision stage is not present.
+        // 1. Drop rules whose hardware or vision stage is not present — and, in simple
+        //    mode, the ones that only speak about individual plants.
+        //
+        //    Listed as a suppression rather than quietly skipped, for the same reason
+        //    a missing probe is: "why am I not being told to harvest?" deserves an
+        //    answer, and the answer here is a setting the operator can change.
         let mut satisfied: Vec<&dyn Rule> = Vec::new();
         for rule in &self.rules {
+            if !state.mode.tracks_plants() && rule.scope() == RuleScope::Plant {
+                suppressed.push(Suppression {
+                    rule: rule.id(),
+                    reason: SuppressionReason::PlantLevel,
+                });
+                continue;
+            }
             let missing = state.capabilities.missing(rule.requires());
             if missing.is_empty() {
                 satisfied.push(rule.as_ref());
@@ -236,9 +272,14 @@ mod tests {
         produces: &'static [TaskKind],
         precedence: u8,
         severity: Severity,
+        scope: RuleScope,
     }
 
     impl Rule for StubRule {
+        fn scope(&self) -> RuleScope {
+            self.scope
+        }
+
         fn id(&self) -> RuleId {
             self.id.clone()
         }
@@ -275,6 +316,7 @@ mod tests {
             produces: &[TaskKind::AddPlantFood],
             precedence: PRECEDENCE_FALLBACK,
             severity: Severity::Advisory,
+            scope: RuleScope::Garden,
         })
     }
 
@@ -285,6 +327,7 @@ mod tests {
             produces: &[TaskKind::AddPlantFood],
             precedence: PRECEDENCE_MEASURED,
             severity: Severity::Important,
+            scope: RuleScope::Garden,
         })
     }
 
@@ -354,6 +397,7 @@ mod tests {
             produces: &[TaskKind::AddWater],
             precedence: PRECEDENCE_FALLBACK,
             severity: Severity::Info,
+            scope: RuleScope::Garden,
         });
         let loud = Box::new(StubRule {
             id: RuleId::from_static("loud"),
@@ -361,6 +405,7 @@ mod tests {
             produces: &[TaskKind::AddWater],
             precedence: PRECEDENCE_FALLBACK,
             severity: Severity::Critical,
+            scope: RuleScope::Garden,
         });
         let state = GardenState::new_studio_2(t0());
         // Same precedence, so both run; ties break on id, and "loud" < "quiet".
@@ -379,6 +424,7 @@ mod tests {
                 produces: &[TaskKind::Harvest],
                 precedence: PRECEDENCE_FALLBACK,
                 severity: Severity::Advisory,
+                scope: RuleScope::Garden,
             }),
             Box::new(StubRule {
                 id: RuleId::from_static("b"),
@@ -386,6 +432,7 @@ mod tests {
                 produces: &[TaskKind::AddWater],
                 precedence: PRECEDENCE_FALLBACK,
                 severity: Severity::Critical,
+                scope: RuleScope::Garden,
             }),
         ]);
         let eval = engine.evaluate(&state);

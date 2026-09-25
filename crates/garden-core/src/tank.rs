@@ -131,6 +131,15 @@ pub struct TankState {
     pub last_food_dose: Option<Timestamp>,
     pub last_conditioner: Option<Timestamp>,
     pub last_deep_clean: Option<Timestamp>,
+    /// Last time the roots were looked at, recorded against the garden rather than
+    /// against a planting.
+    ///
+    /// Slightly odd company for the tank's own history, and it earns the seat: on this
+    /// machine the roots hang in the reservoir, and in simple mode there is no planting
+    /// to hang the timestamp off. Advanced mode keeps using each planting's own
+    /// `last_root_check`, which is finer-grained and still the better answer when the
+    /// plants are known.
+    pub last_root_check: Option<Timestamp>,
     /// Water added since the last food dose. Drives the fallback dosing rule when no
     /// EC probe is fitted.
     pub litres_added_since_food_dose: f32,
@@ -149,6 +158,7 @@ impl TankState {
             last_food_dose: None,
             last_conditioner: None,
             last_deep_clean: None,
+            last_root_check: None,
             // The initial fill is plain water that no dose has accounted for. Starting
             // this at zero would deadlock a new garden: dosing is triggered by water
             // added since the last dose, top-offs only happen once plants drink the
@@ -292,6 +302,12 @@ pub enum TankEvent {
     Conditioner,
     /// Full strip-down and scrub.
     DeepClean,
+    /// Roots inspected, and pruned if they needed it.
+    ///
+    /// Garden-level, unlike a planting's own `last_root_check`: in simple mode there
+    /// is no planting to record it against, and one look at the reservoir covers the
+    /// whole tower anyway.
+    RootCheck,
 }
 
 impl TankEvent {
@@ -303,6 +319,7 @@ impl TankEvent {
             TankEvent::FedToStrength { strength } => tank.set_strength(strength, at),
             TankEvent::Conditioner => tank.add_conditioner(at),
             TankEvent::DeepClean => tank.deep_clean(at),
+            TankEvent::RootCheck => tank.last_root_check = Some(at),
         }
     }
 
@@ -319,6 +336,10 @@ impl TankEvent {
                 fill_to_l: geometry.capacity_l,
             }),
             TaskKind::DeepClean => Some(TankEvent::DeepClean),
+            // Only ever reached for a garden-targeted root check. The per-plant one
+            // writes to its own planting instead; the caller sorts them out, because
+            // the same kind legitimately exists at both levels.
+            TaskKind::PruneRoots => Some(TankEvent::RootCheck),
             _ => None,
         }
     }
@@ -330,6 +351,7 @@ impl TankEvent {
             TankEvent::FoodDose { .. } | TankEvent::FedToStrength { .. } => "fed",
             TankEvent::Conditioner => "conditioned",
             TankEvent::DeepClean => "deep cleaned",
+            TankEvent::RootCheck => "checked the roots",
         }
     }
 }

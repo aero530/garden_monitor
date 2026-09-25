@@ -1,6 +1,6 @@
 //! Per-plant work: thinning, pruning, pollination.
 
-use crate::engine::{PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule};
+use crate::engine::{PRECEDENCE_FALLBACK, PRECEDENCE_MEASURED, Rule, RuleScope};
 use garden_core::{
     Capability, DueWindow, GardenState, Planting, RuleId, Severity, Target, Task, TaskKind, Variety,
 };
@@ -39,6 +39,10 @@ impl ThinByCalendarRule {
 impl Rule for ThinByCalendarRule {
     fn id(&self) -> RuleId {
         Self::ID
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Plant
     }
 
     fn produces(&self) -> &'static [TaskKind] {
@@ -87,6 +91,10 @@ impl Rule for ThinBySegmentationRule {
 
     fn requires(&self) -> &'static [Capability] {
         &[Capability::PlantSegmentation]
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Plant
     }
 
     fn produces(&self) -> &'static [TaskKind] {
@@ -171,6 +179,10 @@ impl Rule for PrunePlantRule {
         Self::ID
     }
 
+    fn scope(&self) -> RuleScope {
+        RuleScope::Plant
+    }
+
     fn produces(&self) -> &'static [TaskKind] {
         &[TaskKind::PrunePlant]
     }
@@ -218,6 +230,10 @@ impl Rule for PrunePlantByCanopyRule {
 
     fn requires(&self) -> &'static [Capability] {
         &[Capability::CanopyMetrics]
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Plant
     }
 
     fn produces(&self) -> &'static [TaskKind] {
@@ -314,6 +330,10 @@ impl Rule for GerminationCheckRule {
         Self::ID
     }
 
+    fn scope(&self) -> RuleScope {
+        RuleScope::Plant
+    }
+
     fn produces(&self) -> &'static [TaskKind] {
         &[TaskKind::Inspect]
     }
@@ -379,6 +399,10 @@ impl PollinationRule {
 impl Rule for PollinationRule {
     fn id(&self) -> RuleId {
         Self::ID
+    }
+
+    fn scope(&self) -> RuleScope {
+        RuleScope::Plant
     }
 
     fn produces(&self) -> &'static [TaskKind] {

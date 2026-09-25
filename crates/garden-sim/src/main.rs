@@ -131,6 +131,8 @@ fn print_capability_report(state: &GardenState, label: &str) {
         match &s.reason {
             SuppressionReason::MissingCapabilities(caps) => gaps.push((s.rule.clone(), caps.clone())),
             SuppressionReason::Outranked { .. } => outranked += 1,
+            // Not a gap to report: the operator asked not to be told about plants.
+            SuppressionReason::PlantLevel => {}
         }
     }
 
