@@ -261,7 +261,10 @@ pub fn sense(state: &mut GardenState, env: &Environment, fouling: Fouling, rng: 
 
     let draw = state.pump.nominal_ma * (1.0 + fouling.pump_penalty()) * (1.0 + rng.noise(n));
     state.sensors.pump_current_ma = Some(draw);
-    state.pump.current_ma_ewma = ewma(state.pump.current_ma_ewma, draw, 0.25);
+    // `observe` drops anything below the running threshold by itself, so a simulated
+    // pump that is off leaves the measurement alone rather than averaging its idle
+    // draw into the mean.
+    state.pump.observe(draw, 0.25);
 
     state.sensors.ec_ms_cm = Some(state.tank.estimated_strength() * EC_AT_FULL_STRENGTH);
     // pH drifts alkaline as nutrients are consumed.

@@ -116,8 +116,11 @@ impl Rule for RootPruneByFlowRule {
     }
 
     fn evaluate(&self, state: &GardenState) -> Vec<Task> {
+        // `None` means nothing has caught the pump running yet, which reads the same
+        // as "not restricted" on purpose: this rule owns the kind, so standing down
+        // silently would take root pruning off the list entirely.
         let ratio = state.pump.restriction_ratio();
-        let restricted = ratio >= PumpBaseline::ADVISORY_RATIO;
+        let restricted = ratio.is_some_and(|r| r >= PumpBaseline::ADVISORY_RATIO);
 
         // Not restricted: this rule owns the kind, so fall through to plain cadence.
         if !restricted {
@@ -131,6 +134,7 @@ impl Rule for RootPruneByFlowRule {
                 .collect();
         }
 
+        let ratio = ratio.expect("restricted implies a measurement");
         let excess = (ratio - 1.0) * 100.0;
         let urgent = ratio >= PumpBaseline::URGENT_RATIO;
 

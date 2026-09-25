@@ -472,11 +472,12 @@ mod tests {
         let mut sim = planted_sim();
         tick_tended(&mut sim,120);
         assert!(sim.fouling_level() > 0.3);
-        assert!(
-            sim.state.pump.restriction_ratio() > 1.1,
-            "ratio was {}",
-            sim.state.pump.restriction_ratio()
-        );
+        let ratio = sim
+            .state
+            .pump
+            .restriction_ratio()
+            .expect("120 ticks is many pump cycles; one must have been measured");
+        assert!(ratio > 1.1, "ratio was {ratio}");
     }
 
     #[test]
@@ -557,12 +558,13 @@ mod tests {
     fn a_deep_clean_resets_fouling_and_the_pump_baseline() {
         let mut sim = planted_sim();
         tick_tended(&mut sim,150);
-        assert!(sim.state.pump.restriction_ratio() > 1.1);
+        assert!(sim.state.pump.restriction_ratio().unwrap() > 1.1);
 
         sim.perform(&task(TaskKind::DeepClean, Target::Garden, sim.state.now));
 
         assert_eq!(sim.fouling_level(), 0.0);
-        assert!((sim.state.pump.restriction_ratio() - 1.0).abs() < 0.01);
+        let ratio = sim.state.pump.restriction_ratio().unwrap();
+        assert!((ratio - 1.0).abs() < 0.01, "{ratio}");
     }
 
     #[test]

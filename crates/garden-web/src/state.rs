@@ -73,9 +73,17 @@ pub async fn build(
             {
                 state.tank.consumption_lpd = rate;
             }
-            if let Some(ma) = sensors.pump_current_ma {
-                state.pump.current_ma_ewma = ma;
-            }
+            // Averaged over the samples that caught the pump running, not taken from
+            // the newest reading. The newest reading is almost always a stopped pump
+            // — four five-minute cycles a day — and reading 0 mA as a measurement of
+            // restriction produced a dashboard confidently claiming -100%.
+            state.pump.running_ma = store
+                .mean_pump_current_ma(
+                    garden.id,
+                    garden_core::time::add_days(now, -PUMP_WINDOW_DAYS),
+                    garden_core::PumpBaseline::RUNNING_MA,
+                )
+                .await?;
 
             state.sensors = sensors;
         }
@@ -148,6 +156,14 @@ async fn overlay_vision(
 /// has failed, and flapping the capability on and off would flip the harvest rule
 /// between measured and calendar every time a frame came out dark.
 const VISION_STALE_DAYS: f64 = 2.0;
+
+/// How far back to look for samples with the pump running.
+///
+/// The pump draws for about twenty minutes a day, so this is really a count of
+/// cycles: three days is a dozen of them, enough to average out a single cycle that
+/// started against a briefly blocked line, and short enough that a restriction
+/// cleared last week is not still being reported.
+const PUMP_WINDOW_DAYS: f64 = 3.0;
 
 /// How far back to look when fitting the water-consumption rate.
 ///

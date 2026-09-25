@@ -346,7 +346,10 @@ impl Rule for DeepCleanByFoulingRule {
         if state.plantings.is_empty() {
             return Vec::new();
         }
-        let ratio = state.pump.restriction_ratio();
+        // Unmeasured falls through to the calendar below, same as unrestricted. A
+        // deep clean that only ever fires on a current reading would never fire at
+        // all on a garden whose pump has not been caught running.
+        let ratio = state.pump.restriction_ratio().unwrap_or(1.0);
 
         let (severity, rationale) = if ratio >= PumpBaseline::URGENT_RATIO {
             (

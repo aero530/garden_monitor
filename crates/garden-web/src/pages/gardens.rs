@@ -410,8 +410,20 @@ fn sensors(state: &GardenState) -> Markup {
             }
             div.card {
                 div.stat-label { "Pump" }
-                div.stat { (format!("{:.0}%", (state.pump.restriction_ratio() - 1.0) * 100.0)) }
-                p.small.muted style="margin:0" { "above clean baseline" }
+                @match state.pump.restriction_ratio() {
+                    Some(ratio) => {
+                        div.stat { (format!("{:+.0}%", (ratio - 1.0) * 100.0)) }
+                        p.small.muted style="margin:0" { "against clean baseline" }
+                    }
+                    // Not a zero and not a dash-shaped nothing: the pump runs four
+                    // times a day for five minutes, so "we have not caught it yet" is
+                    // the ordinary state for a new garden rather than a fault, and the
+                    // tile should say which of the two it is.
+                    None => {
+                        div.stat { "—" }
+                        p.small.muted style="margin:0" { "not yet measured running" }
+                    }
+                }
             }
             @if let Some(ec) = state.sensors.ec_ms_cm {
                 div.card {

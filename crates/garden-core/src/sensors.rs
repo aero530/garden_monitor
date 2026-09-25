@@ -70,35 +70,74 @@ impl SensorSnapshot {
 pub struct PumpBaseline {
     /// Draw recorded immediately after a deep clean, with clear lines.
     pub nominal_ma: f32,
-    /// Exponentially weighted mean of recent readings.
-    pub current_ma_ewma: f32,
+    /// Mean draw across recent samples **taken while the pump was running**.
+    ///
+    /// `None` until such a sample exists, which is the common state rather than an
+    /// edge case: the factory schedule runs the pump four times a day for five
+    /// minutes, so it is drawing current for 1.4% of the day and roughly 99 samples
+    /// in 100 catch it stopped.
+    ///
+    /// This was an `f32` holding whatever the newest reading said. A stopped pump
+    /// draws nothing, so it read 0 mA nearly always, `restriction_ratio` came out at
+    /// 0.0, and the dashboard reported a confident **−100% above clean baseline** —
+    /// a pump using no power because it was switched off, presented as a measurement
+    /// of how clear the lines are. An `Option` makes "nothing has been measured" a
+    /// state the caller must handle rather than a number it can average.
+    pub running_ma: Option<f32>,
 }
 
 impl PumpBaseline {
     pub fn new(nominal_ma: f32) -> Self {
         Self {
             nominal_ma,
-            current_ma_ewma: nominal_ma,
+            running_ma: None,
         }
     }
 
+    /// Draw below which the pump is considered stopped rather than unloaded.
+    ///
+    /// The INA219 reads a few mA of noise around zero with the pump off, and a
+    /// restriction can only be measured against a pump that is actually pushing
+    /// water. Well clear of the noise and well below any real running draw.
+    pub const RUNNING_MA: f32 = 50.0;
+
     /// Current draw as a multiple of the clean baseline. 1.0 is clean.
-    pub fn restriction_ratio(&self) -> f32 {
+    ///
+    /// `None` when nothing has been measured with the pump running, because there is
+    /// no honest answer then — and a rule that reads one anyway stands down to its
+    /// calendar fallback, which is exactly what should happen.
+    pub fn restriction_ratio(&self) -> Option<f32> {
         if self.nominal_ma <= 0.0 {
-            return 1.0;
+            return None;
         }
-        self.current_ma_ewma / self.nominal_ma
+        Some(self.running_ma? / self.nominal_ma)
     }
 
     /// Fold a new reading into the running mean.
+    ///
+    /// Samples below [`RUNNING_MA`] are discarded rather than averaged in: mixing the
+    /// stopped intervals into the mean measures the duty cycle, not the restriction.
     pub fn observe(&mut self, reading_ma: f32, alpha: f32) {
+        if reading_ma < Self::RUNNING_MA {
+            return;
+        }
         let a = alpha.clamp(0.0, 1.0);
-        self.current_ma_ewma = self.current_ma_ewma * (1.0 - a) + reading_ma * a;
+        self.running_ma = Some(match self.running_ma {
+            Some(mean) => mean * (1.0 - a) + reading_ma * a,
+            // The first real sample is the mean; seeding from `nominal_ma` would drag
+            // a genuinely restricted pump back towards clean for its first few reads.
+            None => reading_ma,
+        });
     }
 
     /// Re-baseline after a deep clean, when the system is known to be clear.
+    ///
+    /// A no-op until the pump has been measured running, because re-baselining to
+    /// nothing would set `nominal_ma` from a pump that was off.
     pub fn rebaseline(&mut self) {
-        self.nominal_ma = self.current_ma_ewma;
+        if let Some(measured) = self.running_ma {
+            self.nominal_ma = measured;
+        }
     }
 
     /// Restriction is worth a root check.
@@ -144,9 +183,30 @@ mod tests {
     }
 
     #[test]
-    fn clean_pump_reads_unity_restriction() {
+    fn a_pump_never_caught_running_reports_nothing_rather_than_unity() {
+        // It used to report a clean 1.0, which is a claim about the lines made
+        // without having measured them.
         let pump = PumpBaseline::new(400.0);
-        assert_eq!(pump.restriction_ratio(), 1.0);
+        assert_eq!(pump.restriction_ratio(), None);
+    }
+
+    #[test]
+    fn a_stopped_pump_is_not_a_measurement_of_a_clear_line() {
+        // The bug this whole shape exists to prevent. The factory schedule runs the
+        // pump four times a day for five minutes, so nearly every sample catches it
+        // at rest drawing nothing — and dividing that by the clean baseline gave a
+        // ratio of 0.0, which the dashboard rendered as a confident
+        // "-100% above clean baseline".
+        let mut pump = PumpBaseline::new(400.0);
+        for _ in 0..500 {
+            pump.observe(0.0, 0.1);
+        }
+        assert_eq!(pump.running_ma, None);
+        assert_eq!(pump.restriction_ratio(), None);
+
+        // And one real sample among the silence is enough to measure.
+        pump.observe(520.0, 0.1);
+        assert_eq!(pump.running_ma, Some(520.0));
     }
 
     #[test]
@@ -155,8 +215,27 @@ mod tests {
         for _ in 0..200 {
             pump.observe(520.0, 0.1);
         }
-        assert!((pump.restriction_ratio() - 1.3).abs() < 0.01);
-        assert!(pump.restriction_ratio() > PumpBaseline::ADVISORY_RATIO);
+        let ratio = pump.restriction_ratio().unwrap();
+        assert!((ratio - 1.3).abs() < 0.01, "{ratio}");
+        assert!(ratio > PumpBaseline::ADVISORY_RATIO);
+    }
+
+    #[test]
+    fn idle_samples_between_cycles_do_not_dilute_the_measurement() {
+        // A pump running at 520 mA for five minutes in every six hours is restricted
+        // whether or not it is running right now. Averaging the stopped intervals in
+        // would measure the duty cycle instead, and report roughly 1.4% of the truth.
+        let mut restricted = PumpBaseline::new(400.0);
+        for _ in 0..50 {
+            for _ in 0..70 {
+                restricted.observe(0.0, 0.1); // between cycles
+            }
+            for _ in 0..5 {
+                restricted.observe(520.0, 0.1); // a cycle
+            }
+        }
+        let ratio = restricted.restriction_ratio().unwrap();
+        assert!((ratio - 1.3).abs() < 0.01, "{ratio}");
     }
 
     #[test]
@@ -165,9 +244,19 @@ mod tests {
         for _ in 0..200 {
             pump.observe(560.0, 0.1);
         }
-        assert!(pump.restriction_ratio() > PumpBaseline::URGENT_RATIO);
+        assert!(pump.restriction_ratio().unwrap() > PumpBaseline::URGENT_RATIO);
         pump.rebaseline();
-        assert!((pump.restriction_ratio() - 1.0).abs() < 1e-6);
+        assert!((pump.restriction_ratio().unwrap() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rebaselining_an_unmeasured_pump_leaves_the_baseline_alone() {
+        // A deep clean logged before the pump has ever been caught running must not
+        // set the clean baseline from a pump that was switched off — that would
+        // pin `nominal_ma` at nothing and make every later reading look catastrophic.
+        let mut pump = PumpBaseline::new(400.0);
+        pump.rebaseline();
+        assert_eq!(pump.nominal_ma, 400.0);
     }
 
     #[test]

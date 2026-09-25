@@ -129,9 +129,11 @@ pub fn run(sim: &mut Simulation, operator: Operator, days: u32, seed: u64) -> Re
         // recurrence is announced afresh.
         announced.retain(|key, _| evaluation.tasks.iter().any(|t| &t.key == key));
 
-        report.peak_restriction = report
-            .peak_restriction
-            .max(sim.state.pump.restriction_ratio());
+        // Ticks before the simulated pump has run leave the peak alone rather than
+        // pulling it down to a clean 1.0 that was never measured.
+        if let Some(ratio) = sim.state.pump.restriction_ratio() {
+            report.peak_restriction = report.peak_restriction.max(ratio);
+        }
     }
 
     report.harvested_cm2 = sim.harvested_cm2;

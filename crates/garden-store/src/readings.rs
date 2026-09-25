@@ -152,6 +152,36 @@ impl Store {
     /// Refills show up as the level going *up*, so only downward movement between
     /// consecutive samples is counted. Without that the estimate would be dragged
     /// toward zero every time someone topped the tank up.
+    /// Mean pump draw over samples taken while the pump was actually running.
+    ///
+    /// Filtered in SQL rather than by pulling the window into memory. The pump is
+    /// drawing for about 1.4% of the day, so a three-day window is some thousands of
+    /// rows of which a few dozen are the ones that matter, and every sweep and every
+    /// dashboard render asks for it.
+    ///
+    /// `None` when no sample in the window caught it running — which is a normal
+    /// answer for a garden whose agent has been up for less than a pump cycle, not a
+    /// failure.
+    pub async fn mean_pump_current_ma(
+        &self,
+        garden: GardenId,
+        since: Timestamp,
+        min_ma: f32,
+    ) -> Result<Option<f32>> {
+        let row: Option<(Option<f64>,)> = sqlx::query_as(
+            "SELECT AVG(pump_current_ma) FROM readings
+             WHERE garden_id = ?1 AND at >= ?2 AND pump_current_ma >= ?3",
+        )
+        .bind(garden.to_string())
+        .bind(ts::encode(since))
+        .bind(f64::from(min_ma))
+        .fetch_optional(&self.db)
+        .await?;
+        // AVG over no rows is SQL NULL, hence the doubled Option: a row always comes
+        // back, and its single column is what may be absent.
+        Ok(row.and_then(|(mean,)| mean).map(|m| m as f32))
+    }
+
     pub async fn fitted_consumption_lpd(
         &self,
         garden: GardenId,
@@ -374,6 +404,55 @@ mod tests {
         let removed = store.prune_readings(garden, 90.0, now).await.unwrap();
         assert_eq!(removed, 1);
         assert_eq!(store.reading_count(garden).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_pump_mean_ignores_every_sample_taken_while_it_was_stopped() {
+        // A realistic day: the pump draws for five minutes in every six hours, so the
+        // overwhelming majority of samples are a stopped pump at ~0 mA. Averaging all
+        // of them measures the duty cycle; the answer wanted is what it draws while
+        // pushing water.
+        let (store, garden) = fixture().await;
+        let mut at = t0();
+        for cycle in 0..4 {
+            for _ in 0..355 {
+                let mut idle = snapshot(at, Some(150.0));
+                idle.pump_current_ma = Some(if cycle % 2 == 0 { 0.0 } else { 3.0 });
+                store.record_reading(garden, &idle, None).await.unwrap();
+                at = garden_core::time::add_days(at, 1.0 / 1440.0);
+            }
+            for _ in 0..5 {
+                let mut running = snapshot(at, Some(150.0));
+                running.pump_current_ma = Some(520.0);
+                store.record_reading(garden, &running, None).await.unwrap();
+                at = garden_core::time::add_days(at, 1.0 / 1440.0);
+            }
+        }
+
+        let mean = store
+            .mean_pump_current_ma(garden, t0(), garden_core::PumpBaseline::RUNNING_MA)
+            .await
+            .unwrap()
+            .expect("the pump ran twenty times in this window");
+        assert!((mean - 520.0).abs() < 0.01, "{mean}");
+    }
+
+    #[tokio::test]
+    async fn a_pump_that_never_ran_in_the_window_averages_to_nothing() {
+        // SQL AVG over no rows is NULL, and that has to survive as None rather than
+        // arriving as a 0.0 that reads like a measurement of a dead pump.
+        let (store, garden) = fixture().await;
+        let mut idle = snapshot(t0(), Some(150.0));
+        idle.pump_current_ma = Some(0.0);
+        store.record_reading(garden, &idle, None).await.unwrap();
+
+        assert_eq!(
+            store
+                .mean_pump_current_ma(garden, t0(), garden_core::PumpBaseline::RUNNING_MA)
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     #[tokio::test]

@@ -204,9 +204,16 @@ async fn state_at(
             {
                 state.tank.consumption_lpd = rate;
             }
-            if let Some(ma) = sensors.pump_current_ma {
-                state.pump.current_ma_ewma = ma;
-            }
+            // Same contract as the live path: the mean of samples that caught the
+            // pump running, over the same window, so a replay and the dashboard
+            // cannot disagree about whether the lines are clear.
+            state.pump.running_ma = store
+                .mean_pump_current_ma(
+                    garden,
+                    add_days(at, -PUMP_WINDOW_DAYS),
+                    garden_core::PumpBaseline::RUNNING_MA,
+                )
+                .await?;
             state.sensors = sensors.clone();
         }
         None => {
@@ -237,6 +244,8 @@ async fn state_at(
 
 /// A reading older than this no longer describes the garden.
 const READING_STALE_DAYS: f64 = 1.0;
+/// Matches the brain's window, so replayed pump health means the same thing.
+const PUMP_WINDOW_DAYS: f64 = 3.0;
 const VISION_STALE_DAYS: f64 = 2.0;
 const CONSUMPTION_WINDOW_DAYS: f64 = 14.0;
 
