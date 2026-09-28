@@ -11,24 +11,61 @@ use garden_core::{
     TaskKind,
 };
 
-/// Care-cycle cadence: the near end of the documented 2-4 week window.
-const CHECK_DUE_DAYS: f64 = 21.0;
-/// The far end. Past this it is overdue, not merely due.
-const CHECK_LATE_DAYS: f64 = 28.0;
+/// Gardyn's published cadence: "Checking your plants' roots every 2 weeks".
+///
+/// Was 21 days, taken as the near end of a documented "2-4 week" window from an older
+/// source. The dedicated root article is both more specific and tighter, and it gives
+/// the reason: root rot is prevented by catching it early, and "consistent & small
+/// root pruning is less likely to shock your plant than more sporadic & severe root
+/// pruning". A cadence a week too slow makes every trim a bigger one.
+const CHECK_DUE_DAYS: f64 = 14.0;
+
+/// "Check mature plants' roots weekly" — same article, step 7.
+///
+/// A producing plant has the root mass to fill a yPod, which is when roots start
+/// crossing into the pod below and blocking drainage. Only reachable when the stage is
+/// known, so simple mode uses the fortnightly figure for everything.
+const MATURE_CHECK_DUE_DAYS: f64 = 7.0;
+
+/// Grace between "due" and "overdue".
+///
+/// One further interval rather than a fixed number of days, so the weekly cadence for
+/// mature plants is not treated as late at the same moment as the fortnightly one —
+/// which would make every mature plant permanently overdue.
+const CHECK_LATE_MULTIPLIER: f64 = 1.5;
+
 /// When flow is restricted, stop waiting for the cadence.
 const CHECK_RESTRICTED_DAYS: f64 = 12.0;
 
+/// How often this plant's roots want looking at.
+fn due_days(stage: Stage) -> f64 {
+    if stage.is_producing() {
+        MATURE_CHECK_DUE_DAYS
+    } else {
+        CHECK_DUE_DAYS
+    }
+}
+
 /// Plantings old enough for root pruning to be meaningful, with days since last check.
-fn candidates(state: &GardenState) -> Vec<(&garden_core::Planting, f64)> {
+fn candidates(state: &GardenState) -> Vec<(&garden_core::Planting, f64, Stage)> {
     state
         .planted()
+        // Seedlings are excluded, which also covers the article's note that "1-2
+        // month-old plants are still developing their roots, so it's unlikely you'll
+        // need to trim any at that stage".
         .filter(|(p, v)| {
             !matches!(
                 p.stage(v, state.now),
                 Stage::Seeded | Stage::Seedling | Stage::Spent
             )
         })
-        .map(|(p, _)| (p, p.days_since_root_check(state.now)))
+        .map(|(p, v)| {
+            (
+                p,
+                p.days_since_root_check(state.now),
+                p.stage(v, state.now),
+            )
+        })
         .collect()
 }
 
@@ -44,7 +81,7 @@ fn garden_root_check(state: &GardenState, source: RuleId, urgent_after: f64) -> 
         .last_root_check
         .map_or(f64::INFINITY, |at| garden_core::time::days_between(at, state.now));
 
-    let severity = if since >= CHECK_LATE_DAYS {
+    let severity = if since >= urgent_after * CHECK_LATE_MULTIPLIER {
         Severity::Important
     } else if since >= urgent_after {
         Severity::Advisory
@@ -114,10 +151,11 @@ impl Rule for RootPruneCadenceRule {
         }
         candidates(state)
             .into_iter()
-            .filter_map(|(planting, since)| {
-                let severity = if since >= CHECK_LATE_DAYS {
+            .filter_map(|(planting, since, stage)| {
+                let due = due_days(stage);
+                let severity = if since >= due * CHECK_LATE_MULTIPLIER {
                     Severity::Important
-                } else if since >= CHECK_DUE_DAYS {
+                } else if since >= due {
                     Severity::Advisory
                 } else {
                     return None;
@@ -200,7 +238,7 @@ impl Rule for RootPruneByFlowRule {
 
         candidates(state)
             .into_iter()
-            .filter_map(|(planting, since)| {
+            .filter_map(|(planting, since, _)| {
                 let due_at = if urgent { 0.0 } else { CHECK_RESTRICTED_DAYS };
                 if since < due_at {
                     return None;
@@ -236,17 +274,32 @@ mod tests {
     }
 
     fn garden(last_check_days_ago: Option<f64>) -> GardenState {
+        garden_aged(last_check_days_ago, 30.0)
+    }
+
+    /// A garden holding one kale, germinated `germinated_days_ago` ago.
+    ///
+    /// The age is the knob because it decides the stage, and the stage decides the
+    /// cadence: producing plants are checked weekly, everything else fortnightly.
+    fn garden_aged(last_check_days_ago: Option<f64>, germinated_days_ago: f64) -> GardenState {
         let mut g = GardenState::new_studio_2(t0());
         let mut p = Planting::new(
             PlantingId(1),
             SlotId(0),
             VarietyId::new("kale-lacinato"),
-            add_days(t0(), -50.0),
+            add_days(t0(), -(germinated_days_ago + 6.0)),
         );
-        p.germinated_at = Some(add_days(t0(), -44.0)); // mature
+        p.germinated_at = Some(add_days(t0(), -germinated_days_ago));
         p.last_root_check = last_check_days_ago.map(|d| add_days(t0(), -d));
         g.plantings.push(p);
         g
+    }
+
+    /// The stage the fixture actually reached, so these tests cannot quietly drift
+    /// onto the wrong cadence if the variety book is revised.
+    fn stage_of(g: &GardenState) -> Stage {
+        let (p, v) = g.planted().next().expect("one planting");
+        p.stage(v, g.now)
     }
 
     fn both_rules() -> Engine {
@@ -262,16 +315,65 @@ mod tests {
     }
 
     #[test]
-    fn cadence_fires_at_three_weeks() {
-        let tasks = both_rules().evaluate(&garden(Some(22.0))).tasks;
+    fn a_producing_plant_is_asked_about_weekly() {
+        // "Check mature plants' roots weekly" — the root article, step 7.
+        let g = garden_aged(Some(8.0), 70.0);
+        assert!(stage_of(&g).is_producing(), "fixture should be producing");
+
+        let tasks = both_rules().evaluate(&g).tasks;
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].severity, Severity::Advisory);
+
+        // And six days is inside the week.
+        assert!(both_rules().evaluate(&garden_aged(Some(6.0), 70.0)).tasks.is_empty());
     }
 
     #[test]
-    fn cadence_escalates_at_four_weeks() {
-        let tasks = both_rules().evaluate(&garden(Some(30.0))).tasks;
-        assert_eq!(tasks[0].severity, Severity::Important);
+    fn a_plant_not_yet_producing_is_asked_about_fortnightly() {
+        // "Checking your plants' roots every 2 weeks" — the same article's prevention
+        // list. Eight days is due for a mature plant and not for this one, which is
+        // the whole reason the cadence varies by stage.
+        let g = garden_aged(Some(8.0), 30.0);
+        assert!(!stage_of(&g).is_producing(), "fixture should not be producing yet");
+        assert!(both_rules().evaluate(&g).tasks.is_empty());
+
+        let due = garden_aged(Some(15.0), 30.0);
+        assert_eq!(both_rules().evaluate(&due).tasks.len(), 1);
+    }
+
+    #[test]
+    fn overdue_escalates_at_half_an_interval_past_due() {
+        // Proportional, not a fixed number of days. A flat grace measured for the
+        // fortnightly cadence would make every mature plant overdue the moment it
+        // became due, since its whole interval is shorter than that grace.
+        let mature = both_rules().evaluate(&garden_aged(Some(11.0), 70.0)).tasks;
+        assert_eq!(mature[0].severity, Severity::Important);
+
+        let young = both_rules().evaluate(&garden_aged(Some(11.0), 30.0)).tasks;
+        assert!(young.is_empty(), "11 days is not yet due on the fortnightly cadence");
+        let young_late = both_rules().evaluate(&garden_aged(Some(22.0), 30.0)).tasks;
+        assert_eq!(young_late[0].severity, Severity::Important);
+    }
+
+    #[test]
+    fn the_cadence_matches_the_article_it_came_from() {
+        // The numbers and the prose have to agree, or the guide linked from the
+        // reminder contradicts the reminder.
+        assert_eq!(CHECK_DUE_DAYS, 14.0);
+        assert_eq!(MATURE_CHECK_DUE_DAYS, 7.0);
+
+        let guide = garden_core::GuideBook::published()
+            .get(garden_core::guide::ROOT_CHECK)
+            .expect("the root guide is embedded")
+            .clone();
+        let prose: String = guide
+            .sections
+            .iter()
+            .flat_map(|s| std::iter::once(s.title.clone()).chain(s.body.iter().cloned()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(prose.contains("every 2 weeks"), "{prose}");
+        assert!(prose.contains("weekly"), "{prose}");
     }
 
     #[test]
@@ -296,7 +398,10 @@ mod tests {
 
     #[test]
     fn a_restricted_pump_fires_well_before_the_cadence_would() {
-        let mut g = garden(Some(14.0)); // cadence alone would stay quiet
+        // 13 days: past the restricted threshold of 12, inside the fortnightly cadence
+        // of 14. A narrow gap now that the cadence has tightened, and that narrowness
+        // is the point — the flow signal buys less time than it used to.
+        let mut g = garden(Some(13.0));
         // Stated, not inherited. These used to lean on a hardcoded 400 mA default
         // that no real garden ever had, which is how the restriction percentage came
         // to be measured against a number nobody had measured.

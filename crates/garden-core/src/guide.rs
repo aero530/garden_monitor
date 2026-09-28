@@ -28,6 +28,10 @@ const GUIDES: &str = include_str!("../data/maintenance-guides.json");
 pub const TANK_REFRESH: &str = "tank-refresh";
 /// The slug of the deep-clean guide.
 pub const DEEP_CLEAN: &str = "deep-clean";
+/// The slug of the root check-and-trim guide.
+pub const ROOT_CHECK: &str = "root-check";
+/// The slug of the herb harvesting guide.
+pub const HARVEST_HERBS: &str = "harvest-herbs";
 
 /// One transcribed procedure.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,16 +114,17 @@ impl GuideBook {
 
     /// Guides in a stable order: refresh before clean, matching how often each is done.
     pub fn all(&self) -> impl Iterator<Item = &Guide> {
-        // Frequency order rather than alphabetical. A monthly job belongs above an
-        // occasional one, and alphabetical would put deep clean first.
-        [TANK_REFRESH, DEEP_CLEAN]
+        // Frequency order rather than alphabetical. A fortnightly job belongs above a
+        // monthly one, and alphabetical would put deep clean first.
+        [ROOT_CHECK, TANK_REFRESH, DEEP_CLEAN, HARVEST_HERBS]
             .into_iter()
             .filter_map(|slug| self.get(slug))
-            .chain(
-                self.0
-                    .values()
-                    .filter(|g| g.slug != TANK_REFRESH && g.slug != DEEP_CLEAN),
-            )
+            .chain(self.0.values().filter(|g| {
+                !matches!(
+                    g.slug.as_str(),
+                    ROOT_CHECK | TANK_REFRESH | DEEP_CLEAN | HARVEST_HERBS
+                )
+            }))
     }
 
     pub fn len(&self) -> usize {
@@ -151,11 +156,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn both_published_guides_are_embedded() {
+    fn every_published_guide_is_embedded() {
         let book = GuideBook::published();
-        assert_eq!(book.len(), 2);
-        assert!(book.get(TANK_REFRESH).is_some());
-        assert!(book.get(DEEP_CLEAN).is_some());
+        for slug in [ROOT_CHECK, TANK_REFRESH, DEEP_CLEAN, HARVEST_HERBS] {
+            assert!(book.get(slug).is_some(), "{slug} is missing");
+        }
+        assert_eq!(book.len(), 4);
     }
 
     #[test]
@@ -262,9 +268,11 @@ mod tests {
     }
 
     #[test]
-    fn refresh_is_listed_before_clean() {
+    fn guides_are_listed_by_how_often_the_job_comes_round() {
+        // Fortnightly, monthly, occasional, as-needed. Alphabetical would open with
+        // deep clean, which is the rarest of the four.
         let book = GuideBook::published();
         let order: Vec<&str> = book.all().map(|g| g.slug.as_str()).collect();
-        assert_eq!(order, vec![TANK_REFRESH, DEEP_CLEAN]);
+        assert_eq!(order, vec![ROOT_CHECK, TANK_REFRESH, DEEP_CLEAN, HARVEST_HERBS]);
     }
 }

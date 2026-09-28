@@ -169,8 +169,10 @@ fn section_card(section: &GuideSection) -> Markup {
 /// remind you about — see `garden_rules::maintenance`.
 fn cadence(slug: &str) -> &'static str {
     match slug {
+        garden_core::guide::ROOT_CHECK => "every 2 weeks, weekly once producing",
         garden_core::guide::TANK_REFRESH => "every 4 weeks",
         garden_core::guide::DEEP_CLEAN => "when conditions call for it",
+        garden_core::guide::HARVEST_HERBS => "whenever growth needs keeping in check",
         _ => "occasional",
     }
 }
@@ -186,6 +188,16 @@ fn summary(slug: &str) -> &'static str {
             "Strip the columns, soak the yPods in citric acid, and run the solution \
              through the lines. For algae, root pieces, salt deposits or pests — or \
              before a break from growing."
+        }
+        garden_core::guide::ROOT_CHECK => {
+            "Pull each yPod, look at the roots, and pinch out anything brown, slimy or \
+             smelly. Catching root rot early is most of the job — small trims often \
+             beat one severe one later."
+        }
+        garden_core::guide::HARVEST_HERBS => {
+            "Leafy herbs are cut from the outside in; woody ones give up the top half \
+             of a branch. Keeping them cut back stops the tall ones shading everything \
+             beneath them."
         }
         _ => "",
     }

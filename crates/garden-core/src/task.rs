@@ -117,6 +117,11 @@ impl TaskKind {
         match self {
             TaskKind::TankRefresh => Some(crate::guide::TANK_REFRESH),
             TaskKind::DeepClean => Some(crate::guide::DEEP_CLEAN),
+            TaskKind::PruneRoots => Some(crate::guide::ROOT_CHECK),
+            // Herbs specifically. The guide says so in its first line, and a harvest
+            // task on a lettuce linking to it is better than linking to nothing —
+            // half of it (cut from the outside in) is the same job.
+            TaskKind::Harvest => Some(crate::guide::HARVEST_HERBS),
             _ => None,
         }
     }
@@ -396,14 +401,22 @@ mod tests {
     }
 
     #[test]
-    fn only_the_two_physical_jobs_carry_a_guide() {
-        // A dose is a number the task already states. A refresh or a clean is a
-        // procedure, and those are the two Gardyn actually publishes.
+    fn only_the_jobs_with_a_published_procedure_carry_a_guide() {
+        // A dose is a number the task already states, so it needs no procedure. These
+        // four are hands-in-the-garden jobs Gardyn actually publishes steps for.
         let with: Vec<TaskKind> = TaskKind::ALL
             .into_iter()
             .filter(|k| k.guide_slug().is_some())
             .collect();
-        assert_eq!(with, vec![TaskKind::TankRefresh, TaskKind::DeepClean]);
+        assert_eq!(
+            with,
+            vec![
+                TaskKind::PruneRoots,
+                TaskKind::Harvest,
+                TaskKind::TankRefresh,
+                TaskKind::DeepClean
+            ]
+        );
     }
 
     #[test]

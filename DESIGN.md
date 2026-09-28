@@ -717,22 +717,31 @@ of its own — only a compact read of the outstanding garden-level tasks.
 ## 8. Rules catalog
 
 From the documented Gardyn care cycle — top off weekly, refresh the tank at least
-every 4 weeks, HydroBoost with every top-off and refresh, root check every 2–4 weeks,
-thin during weeks 2–6 — plus sensor-derived triggers.
+every 4 weeks, HydroBoost with every top-off and refresh, thin during weeks 2–6 —
+plus sensor-derived triggers.
+
+**Root checks follow the dedicated article, not the care cycle.** The care-cycle page
+gives a loose "2–4 weeks"; the root article is both more specific and tighter —
+*"Checking your plants' roots every 2 weeks"*, and *"Check mature plants' roots
+weekly"*. The rules use 14 days, 7 once a plant is producing, because the article also
+gives the reason: root rot is prevented by catching it early, and *"consistent & small
+root pruning is less likely to shock your plant than more sporadic & severe root
+pruning"*. A cadence a week too slow makes every trim a bigger one.
 
 Gardyn publishes **no** cleaning interval: a deep clean is driven by conditions
 (algae, root pieces, salt deposits, pests, or a planned break from growing), so the
 measured signal leads there and the annual entry below is only a backstop for a garden
 with no pump sensor fitted. Both procedures are quoted verbatim in
 `garden-core/data/maintenance-guides.json` and served at `/guides`, so a reminder can
-link to the steps rather than assuming they are remembered.
+link to the steps rather than assuming they are remembered. Four guides are carried:
+root checks, tank refresh, deep clean, and harvesting herbs.
 
 | Task | Calendar trigger | Measured trigger |
 |---|---|---|
 | Add water | — | level + consumption rate → forecast; computes *how much* |
 | Add plant food | dose ∝ liters added; half-strength pre-germination | EC below variety target |
 | Add conditioner | every top-off / refresh | algae pixels, pump current drift |
-| Prune roots | every 2–4 weeks per planting | pump current ↑, consumption ↓ |
+| Prune roots | every 2 weeks per planting; weekly once producing | pump current ↑, consumption ↓ |
 | Prune plants | variety flag + age | canopy area threshold, neighbor shading |
 | Harvest | days-to-harvest, cut-and-come-again cadence | canopy area, bolting risk from heat |
 | Tank refresh | every 4 weeks, 7 days' notice | widespread measured chlorosis pulls it forward |
@@ -1103,6 +1112,8 @@ once the rest is proven and a rollback has been rehearsed.
 - [Gardyn — Getting to Know Your Gardyn's Care Cycle](https://help.mygardyn.com/en/articles/1772865)
 - [Gardyn — Tank Refresh Guide](https://help.mygardyn.com/en/articles/1788097) — cadence, dosing table, and the refresh procedure quoted in `maintenance-guides.json`
 - [Gardyn — How to Deep Clean Your Gardyn](https://help.mygardyn.com/en/articles/6166337) — the cleaning procedure, and the conditions that call for one
+- [Gardyn — How to Check & Trim (Prune) Roots](https://help.mygardyn.com/en/articles/1771393) — the root-check cadence the rules use, healthy-vs-rotten indicators, and the procedure quoted in `maintenance-guides.json`
+- [Gardyn — Harvesting Herbs](https://help.mygardyn.com/en/articles/1771073) — leafy vs stemmed herbs, and the 6–8 inch minimum before cutting a woody one
 - [Gardyn — How the Gardyn's Cameras Work](https://help.mygardyn.com/en/articles/1773313)
 - [Gardyn Studio 2 product page](https://mygardyn.com/product/gardyn-studio-gen2/)
 - [Gardyn — Security update](https://mygardyn.com/blog/security-update/)
