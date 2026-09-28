@@ -21,7 +21,7 @@ pub mod policy;
 
 pub use calendar::{CalendarTask, render as render_calendar};
 pub use email::{EmailChannel, EmailConfig, EmailError};
-pub use message::{Notification, NotificationAction, compose, compose_brief};
+pub use message::{Notification, NotificationAction, compose, compose_brief, compose_group};
 pub use ntfy::{NtfyChannel, NtfyConfig, NtfyError};
 pub use policy::{Decision, HoldReason, LastNotified, QuietHours, Reach, decide, reach_for};
 

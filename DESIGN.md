@@ -720,6 +720,14 @@ From the documented Gardyn care cycle — top off weekly, refresh the tank at le
 every 4 weeks, HydroBoost with every top-off and refresh, thin during weeks 2–6 —
 plus sensor-derived triggers.
 
+**A root check is one job for the whole tower, not one per plant.** Gardyn's own
+procedure is a single session — one bowl on the lid, each yPod pulled in turn, the
+tweezers rinsed once at the end. Sixteen reminders for one twenty-minute job is not
+finer-grained reporting; it is the same job listed sixteen times, and nobody checks
+slot 3's roots on Tuesday and slot 7's on Friday. So it is recorded against the garden
+(`TankEvent::RootCheck`), in both modes. Each planting keeps its own `last_root_check`
+as history, and no rule reads it.
+
 **Root checks follow the dedicated article, not the care cycle.** The care-cycle page
 gives a loose "2–4 weeks"; the root article is both more specific and tighter —
 *"Checking your plants' roots every 2 weeks"*, and *"Check mature plants' roots
@@ -741,7 +749,7 @@ root checks, tank refresh, deep clean, and harvesting herbs.
 | Add water | — | level + consumption rate → forecast; computes *how much* |
 | Add plant food | dose ∝ liters added; half-strength pre-germination | EC below variety target |
 | Add conditioner | every top-off / refresh | algae pixels, pump current drift |
-| Prune roots | every 2 weeks per planting; weekly once producing | pump current ↑, consumption ↓ |
+| Prune roots | every 2 weeks for the garden; weekly once anything is producing | pump current ↑, consumption ↓ |
 | Prune plants | variety flag + age | canopy area threshold, neighbor shading |
 | Harvest | days-to-harvest, cut-and-come-again cadence | canopy area, bolting risk from heat |
 | Tank refresh | every 4 weeks, 7 days' notice | widespread measured chlorosis pulls it forward |
@@ -804,6 +812,19 @@ able to dose the tank.
 ---
 
 ## 10. Notifications
+
+**One notification per kind, never one per plant.** The garden is the unit a person
+acts on: five plants ready to cut is one trip with one pair of scissors, and five
+separate pushes for it is how an app gets muted — after which the one that mattered is
+lost with the rest. Whole-garden work is already one task per kind, so grouping only
+ever collapses the per-plant kinds, and only in advanced mode.
+
+A group carries no action buttons. A grant is scoped to a single task, so a "Done" on
+a group of five could close only one of them while appearing to close all five; the
+body tap opens the garden, where each has its own. A single outstanding task of a kind
+keeps its buttons, because there the grant is unambiguous. Rate limiting is keyed on
+the kind, so harvesting one of five does not leave four keys ready to fire afresh on
+the next sweep.
 
 The "I don't want to have to remember" requirement is doing most of the work here.
 

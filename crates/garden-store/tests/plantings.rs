@@ -194,9 +194,14 @@ async fn harvesting_stamps_the_date_and_counts_up() {
 
 #[tokio::test]
 async fn recording_a_root_check_stops_the_cadence_rule_repeating() {
-    // The reason this table exists at all: the rule engine is stateless and
+    // The reason this closed loop exists at all: the rule engine is stateless and
     // re-derives from stored state, so the only thing that quietens a cadence rule is
     // the stored date moving.
+    //
+    // The date it reads is the *garden's*, not the planting's. A root check is one
+    // session covering the whole tower — Gardyn's own procedure is one bowl on the
+    // lid and each pod pulled in turn — so it is recorded against the garden, and
+    // each planting's own `last_root_check` is history that no rule consults.
     let (store, kitchen, _, _) = fixture().await;
     let planted = garden_core::time::add_days(t0(), -60.0);
     let germinated = garden_core::time::add_days(t0(), -54.0);
@@ -210,14 +215,19 @@ async fn recording_a_root_check_stops_the_cadence_rule_repeating() {
         .await
         .unwrap();
 
-    let build = |plantings: Vec<garden_core::Planting>| {
+    let geometry = garden_core::TankGeometry::STUDIO_2;
+    let build = |plantings: Vec<garden_core::Planting>, tank: garden_core::TankState| {
         let mut state = garden_core::GardenState::for_garden(kitchen.id, t0());
         state.capabilities = garden_core::CapabilitySet::empty();
         state.plantings = plantings;
+        state.tank = tank;
         state
     };
 
-    let before = build(store.active_plantings(kitchen.id).await.unwrap());
+    let before = build(
+        store.active_plantings(kitchen.id).await.unwrap(),
+        store.tank_state_at(kitchen.id, &geometry, t0()).await.unwrap(),
+    );
     let evaluation = garden_rules::default_engine().evaluate(&before);
     assert!(
         evaluation.has(garden_core::TaskKind::PruneRoots),
@@ -225,11 +235,14 @@ async fn recording_a_root_check_stops_the_cadence_rule_repeating() {
     );
 
     store
-        .record_planting_event(kitchen.id, PlantingId(1), PlantingEvent::RootsChecked, t0())
+        .record_tank_event(kitchen.id, garden_core::TankEvent::RootCheck, None, t0())
         .await
         .unwrap();
 
-    let after = build(store.active_plantings(kitchen.id).await.unwrap());
+    let after = build(
+        store.active_plantings(kitchen.id).await.unwrap(),
+        store.tank_state_at(kitchen.id, &geometry, t0()).await.unwrap(),
+    );
     let evaluation = garden_rules::default_engine().evaluate(&after);
     assert!(
         !evaluation.has(garden_core::TaskKind::PruneRoots),

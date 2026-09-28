@@ -83,6 +83,42 @@ pub fn compose(
     }
 }
 
+/// Several plants needing the same thing, as one notification.
+///
+/// The garden is the unit a person acts on. Five plants ready to cut is one trip with
+/// one pair of scissors, and five separate pushes for it is how an app gets muted —
+/// at which point the one that mattered is lost with the rest.
+///
+/// No action buttons, unlike [`compose`]. A grant is scoped to a single task, so a
+/// "Done" here could only honestly close one of the five. Tapping the body opens the
+/// garden, where each has its own button.
+pub fn compose_group(
+    kind: TaskKind,
+    garden_name: &str,
+    targets: &[String],
+    severity: Severity,
+    priority: u8,
+    open_url: Option<String>,
+) -> Notification {
+    let title = format!("{} plants — {kind} — {garden_name}", targets.len());
+
+    let mut body = targets.join("
+");
+    if severity >= Severity::Urgent {
+        body.push_str("
+⚠ overdue soon");
+    }
+
+    Notification {
+        title,
+        body,
+        priority,
+        tags: vec![tag_for(kind).to_string()],
+        actions: Vec::new(),
+        open_url,
+    }
+}
+
 /// The morning brief: everything outstanding, in one message.
 ///
 /// Exists so advisories have somewhere to go other than a push. Without it the only
@@ -180,6 +216,41 @@ mod tests {
             Vec::new(),
         );
         assert!(!mild.body.contains('⚠'));
+    }
+
+    #[test]
+    fn a_group_says_how_many_and_which() {
+        // The count belongs in the title, where a lock screen shows it; the list
+        // belongs in the body, where there is room.
+        let note = compose_group(
+            TaskKind::Harvest,
+            "Kitchen",
+            &["slot 3".into(), "slot 7".into(), "slot 11".into()],
+            Severity::Important,
+            4,
+            Some("https://brain/gardens/1".into()),
+        );
+        assert!(note.title.starts_with("3 plants"), "{}", note.title);
+        assert!(note.title.contains("Kitchen"), "{}", note.title);
+        for slot in ["slot 3", "slot 7", "slot 11"] {
+            assert!(note.body.contains(slot), "{} missing from {:?}", slot, note.body);
+        }
+    }
+
+    #[test]
+    fn a_group_carries_no_action_buttons() {
+        // A grant is scoped to one task, so a "Done" on a group of five could only
+        // honestly close one of them — and it would look like it closed all five.
+        let note = compose_group(
+            TaskKind::Harvest,
+            "Kitchen",
+            &["slot 3".into(), "slot 7".into()],
+            Severity::Important,
+            4,
+            Some("https://brain/gardens/1".into()),
+        );
+        assert!(note.actions.is_empty());
+        assert!(note.open_url.is_some(), "so there is still somewhere to tap");
     }
 
     #[test]

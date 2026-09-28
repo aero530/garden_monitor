@@ -37,45 +37,67 @@ const CHECK_LATE_MULTIPLIER: f64 = 1.5;
 /// When flow is restricted, stop waiting for the cadence.
 const CHECK_RESTRICTED_DAYS: f64 = 12.0;
 
-/// How often this plant's roots want looking at.
-fn due_days(stage: Stage) -> f64 {
-    if stage.is_producing() {
+/// Whether there are roots in this tower worth looking at.
+///
+/// Both halves used to come for free from iterating plantings: an empty garden
+/// produced no candidates, and seedlings were filtered out. Asking the garden instead
+/// of the plants loses both, so they have to be said.
+///
+/// A tower of nothing but seedlings is the second case, and the article is explicit
+/// about it — "1-2 month-old plants are still developing their roots, so it's unlikely
+/// you'll need to trim any at that stage". Simple mode cannot know either way and
+/// assumes there is something in there, which is the same assumption it makes about
+/// feeding.
+fn worth_checking(state: &GardenState) -> bool {
+    if !state.is_tended() {
+        return false;
+    }
+    if !state.mode.tracks_plants() {
+        return true;
+    }
+    state.planted().any(|(p, v)| {
+        !matches!(
+            p.stage(v, state.now),
+            Stage::Seeded | Stage::Seedling | Stage::Spent
+        )
+    })
+}
+
+/// How often this garden's roots want looking at.
+///
+/// Weekly once *anything* in the tower is producing, fortnightly otherwise. Taking the
+/// shorter of the two rather than averaging: the cadence exists to catch root rot
+/// early, and a mature plant filling its yPod is the one most likely to have it.
+fn due_days(state: &GardenState) -> f64 {
+    let any_producing = state
+        .planted()
+        // Seedlings do not count, which also covers the article's note that "1-2
+        // month-old plants are still developing their roots, so it's unlikely you'll
+        // need to trim any at that stage".
+        .any(|(p, v)| p.stage(v, state.now).is_producing());
+
+    if any_producing {
         MATURE_CHECK_DUE_DAYS
     } else {
         CHECK_DUE_DAYS
     }
 }
 
-/// Plantings old enough for root pruning to be meaningful, with days since last check.
-fn candidates(state: &GardenState) -> Vec<(&garden_core::Planting, f64, Stage)> {
-    state
-        .planted()
-        // Seedlings are excluded, which also covers the article's note that "1-2
-        // month-old plants are still developing their roots, so it's unlikely you'll
-        // need to trim any at that stage".
-        .filter(|(p, v)| {
-            !matches!(
-                p.stage(v, state.now),
-                Stage::Seeded | Stage::Seedling | Stage::Spent
-            )
-        })
-        .map(|(p, v)| {
-            (
-                p,
-                p.days_since_root_check(state.now),
-                p.stage(v, state.now),
-            )
-        })
-        .collect()
-}
-
-/// The same cadence, asked of the garden rather than of each plant.
+/// One check, for the whole tower.
 ///
-/// Simple mode has no plantings to iterate, and the answer is a single timestamp:
-/// when the reservoir was last looked into. The severities and the wording are shared
-/// with the per-plant path deliberately — the job is identical, only the thing being
-/// counted differs, and two sets of thresholds would drift.
+/// Not per planting, in either mode. Gardyn's own procedure is a single session —
+/// "Remove each plant from the column, one at a time, to check it" — with one bowl on
+/// the lid and the tweezers rinsed once at the end. Sixteen separate tasks for one
+/// twenty-minute job is not finer-grained reporting, it is the same job listed
+/// sixteen times, and nobody checks slot 3's roots on Tuesday and slot 7's on Friday.
+///
+/// The garden's own `last_root_check` is therefore the only timestamp that matters.
+/// Each planting still carries its own for history, and no rule reads it.
 fn garden_root_check(state: &GardenState, source: RuleId, urgent_after: f64) -> Vec<Task> {
+    if !worth_checking(state) {
+        return Vec::new();
+    }
+
     let since = state
         .tank
         .last_root_check
@@ -104,23 +126,6 @@ fn garden_root_check(state: &GardenState, source: RuleId, urgent_after: f64) -> 
     )]
 }
 
-fn task(
-    planting: &garden_core::Planting,
-    severity: Severity,
-    rationale: String,
-    state: &GardenState,
-    source: RuleId,
-) -> Task {
-    Task::new(
-        TaskKind::PruneRoots,
-        Target::Planting(planting.id),
-        severity,
-        DueWindow::within_days(state.now, 7.0),
-        rationale,
-        source,
-    )
-}
-
 /// Fixed cadence from the care cycle.
 pub struct RootPruneCadenceRule;
 
@@ -146,28 +151,7 @@ impl Rule for RootPruneCadenceRule {
     }
 
     fn evaluate(&self, state: &GardenState) -> Vec<Task> {
-        if !state.mode.tracks_plants() {
-            return garden_root_check(state, Self::ID, CHECK_DUE_DAYS);
-        }
-        candidates(state)
-            .into_iter()
-            .filter_map(|(planting, since, stage)| {
-                let due = due_days(stage);
-                let severity = if since >= due * CHECK_LATE_MULTIPLIER {
-                    Severity::Important
-                } else if since >= due {
-                    Severity::Advisory
-                } else {
-                    return None;
-                };
-                let rationale = if since.is_infinite() {
-                    "roots have never been checked".to_string()
-                } else {
-                    format!("{since:.0} days since the last root check")
-                };
-                Some(task(planting, severity, rationale, state, Self::ID))
-            })
-            .collect()
+        garden_root_check(state, Self::ID, due_days(state))
     }
 }
 
@@ -222,44 +206,35 @@ impl Rule for RootPruneByFlowRule {
         let excess = (ratio - 1.0) * 100.0;
         let urgent = ratio >= PumpBaseline::URGENT_RATIO;
 
-        // Same early trigger, aimed at the tower. The pump measures the whole flow
-        // path, so a restriction it sees was never attributable to one plant anyway.
-        if !state.mode.tracks_plants() {
-            let mut tasks = garden_root_check(state, Self::ID, CHECK_RESTRICTED_DAYS);
-            for t in &mut tasks {
-                t.rationale =
-                    format!("pump drawing {excess:.0}% above its clean baseline — check the roots");
-                if urgent {
-                    t.severity = Severity::Urgent;
-                }
-            }
-            return tasks;
-        }
+        // Aimed at the tower, which is the only thing it could honestly be aimed at:
+        // the pump measures the whole flow path, so a restriction it sees was never
+        // attributable to any one plant.
+        let due_at = if urgent { 0.0 } else { CHECK_RESTRICTED_DAYS };
+        let since = state
+            .tank
+            .last_root_check
+            .map_or(f64::INFINITY, |at| {
+                garden_core::time::days_between(at, state.now)
+            });
+        let last = if since.is_infinite() {
+            "never checked".to_string()
+        } else {
+            format!("last checked {since:.0} days ago")
+        };
 
-        candidates(state)
-            .into_iter()
-            .filter_map(|(planting, since, _)| {
-                let due_at = if urgent { 0.0 } else { CHECK_RESTRICTED_DAYS };
-                if since < due_at {
-                    return None;
-                }
-                let severity = if urgent {
-                    Severity::Urgent
-                } else {
-                    Severity::Important
-                };
-                let last = if since.is_infinite() {
-                    "never checked".to_string()
-                } else {
-                    format!("last checked {since:.0} days ago")
-                };
-                let rationale = format!(
-                    "pump drawing {excess:.0}% above its clean baseline, which points to \
-                     flow restriction; {last}"
-                );
-                Some(task(planting, severity, rationale, state, Self::ID))
-            })
-            .collect()
+        let mut tasks = garden_root_check(state, Self::ID, due_at);
+        for t in &mut tasks {
+            t.rationale = format!(
+                "pump drawing {excess:.0}% above its clean baseline, which points to \
+                 flow restriction; {last}"
+            );
+            t.severity = if urgent {
+                Severity::Urgent
+            } else {
+                Severity::Important
+            };
+        }
+        tasks
     }
 }
 
@@ -290,8 +265,10 @@ mod tests {
             add_days(t0(), -(germinated_days_ago + 6.0)),
         );
         p.germinated_at = Some(add_days(t0(), -germinated_days_ago));
-        p.last_root_check = last_check_days_ago.map(|d| add_days(t0(), -d));
         g.plantings.push(p);
+        // The garden's own timestamp, because the check is one job for the whole
+        // tower. Each planting still carries its own for history; no rule reads it.
+        g.tank.last_root_check = last_check_days_ago.map(|d| add_days(t0(), -d));
         g
     }
 

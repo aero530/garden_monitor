@@ -229,6 +229,73 @@ mod tests {
     }
 
     #[test]
+    fn a_root_check_is_one_job_for_the_whole_tower() {
+        // Sixteen plants, one task. Gardyn's procedure is a single session — one bowl
+        // on the lid, each pod pulled in turn, the tweezers rinsed once at the end —
+        // so sixteen separate reminders are not finer-grained reporting, they are the
+        // same twenty-minute job listed sixteen times. Nobody checks slot 3's roots on
+        // Tuesday and slot 7's on Friday.
+        let mut g = GardenState::new_studio_2(t0());
+        for i in 0..16u8 {
+            let mut p = Planting::new(
+                PlantingId(u64::from(i)),
+                SlotId(i),
+                VarietyId::new("kale-lacinato"),
+                add_days(t0(), -100.0),
+            );
+            p.germinated_at = Some(add_days(t0(), -92.0));
+            g.plantings.push(p);
+        }
+
+        let roots: Vec<_> = default_engine()
+            .evaluate(&g)
+            .tasks
+            .into_iter()
+            .filter(|t| t.kind == TaskKind::PruneRoots)
+            .collect();
+
+        assert_eq!(roots.len(), 1, "one tower, one root check: {roots:?}");
+        assert_eq!(roots[0].target, garden_core::Target::Garden);
+    }
+
+    #[test]
+    fn no_root_check_is_ever_aimed_at_a_single_plant() {
+        // In either mode. The per-plant variant is gone, not merely unused in simple
+        // mode, so this cannot come back by someone flipping a garden to advanced.
+        for mode in [garden_core::GardenMode::Simple, garden_core::GardenMode::Advanced] {
+            let mut g = neglected();
+            g.mode = mode;
+            g.pump.nominal_ma = Some(400.0);
+            for _ in 0..50 {
+                g.pump.observe(600.0, 0.2); // hard restriction, the other trigger
+            }
+            for task in default_engine().evaluate(&g).tasks {
+                if task.kind == TaskKind::PruneRoots {
+                    assert_eq!(task.target, garden_core::Target::Garden, "{mode:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_tower_of_seedlings_is_not_asked_to_have_its_roots_checked() {
+        // "1-2 month-old plants are still developing their roots, so it's unlikely
+        // you'll need to trim any at that stage." This used to fall out of iterating
+        // plantings and filtering; asking the garden instead has to say it.
+        let mut g = GardenState::new_studio_2(t0());
+        let mut p = Planting::new(
+            PlantingId(1),
+            SlotId(0),
+            VarietyId::new("kale-lacinato"),
+            add_days(t0(), -10.0),
+        );
+        p.germinated_at = Some(add_days(t0(), -4.0));
+        g.plantings.push(p);
+
+        assert!(!default_engine().evaluate(&g).has(TaskKind::PruneRoots));
+    }
+
+    #[test]
     fn every_rule_is_registered_exactly_once() {
         let rules = default_rules();
         let mut ids: Vec<_> = rules.iter().map(|r| r.id()).collect();

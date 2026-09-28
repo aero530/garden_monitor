@@ -11,10 +11,13 @@
 use crate::app::AppState;
 use garden_auth::{Permission, TaskAction};
 use garden_core::{Garden, Severity, TaskKey, TaskKind};
-use garden_notify::{NotificationAction, compose, compose_brief, decide, reach_for};
+use garden_notify::{
+    NotificationAction, compose, compose_brief, compose_group, decide, reach_for,
+};
 use garden_store::notifications::NotificationPrefs;
 use garden_store::tasks::TaskRecord;
 use jiff::Timestamp;
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// How often the loop runs.
@@ -97,22 +100,48 @@ async fn sweep_garden(
             continue;
         }
 
+        // One notification per kind, not per plant.
+        //
+        // The garden is the unit a person acts on. Five plants ready to cut is one
+        // trip with one pair of scissors, and five pushes for it is how an app gets
+        // muted — after which the one that mattered is lost with the rest. Whole-
+        // garden work is already one task per kind, so this only ever collapses the
+        // per-plant kinds, and only in advanced mode.
+        let mut groups: BTreeMap<String, Vec<&TaskRecord>> = BTreeMap::new();
+        for task in &tasks {
+            groups.entry(task.kind.clone()).or_default().push(task);
+        }
+
         // Most severe first, so a burst that hits the cap drops the least important
         // rather than whatever happened to sort first.
-        let mut ordered: Vec<&TaskRecord> = tasks.iter().collect();
-        ordered.sort_by(|a, b| b.severity.cmp(&a.severity).then(a.due_at.cmp(&b.due_at)));
+        let mut ordered: Vec<Vec<&TaskRecord>> = groups.into_values().collect();
+        for group in &mut ordered {
+            group.sort_by(|a, b| b.severity.cmp(&a.severity).then(a.due_at.cmp(&b.due_at)));
+        }
+        ordered.sort_by(|a, b| {
+            b[0].severity
+                .cmp(&a[0].severity)
+                .then(a[0].due_at.cmp(&b[0].due_at))
+        });
 
         let mut sent = 0;
-        for task in ordered {
+        for group in &ordered {
             if sent >= MAX_BURST {
                 tracing::info!(
                     garden = %garden.id,
-                    held = tasks.len() - sent,
+                    held = ordered.len() - sent,
                     "burst cap reached; the rest wait for the next sweep or the brief"
                 );
                 break;
             }
-            if deliver_one(state, notifier, garden, &prefs, &member.user, task, now).await? {
+            // A single task keeps its one-tap buttons. They are scoped to one task
+            // key, so a grouped "Done" could only honestly close one of the group.
+            let delivered = if group.len() == 1 {
+                deliver_one(state, notifier, garden, &prefs, &member.user, group[0], now).await?
+            } else {
+                deliver_group(state, notifier, garden, &prefs, &member.user, group, now).await?
+            };
+            if delivered {
                 sent += 1;
             }
         }
@@ -331,6 +360,82 @@ async fn deliver_one(
     Ok(true)
 }
 
+/// Several plants wanting the same thing, as one notification.
+///
+/// Bookkeeping is keyed on the kind rather than on any one task, so the group is
+/// rate-limited as a unit: harvesting one of five plants must not immediately re-fire
+/// the other four as a fresh notification.
+#[allow(clippy::too_many_arguments)]
+async fn deliver_group(
+    state: &AppState,
+    notifier: &garden_notify::Notifier,
+    garden: &Garden,
+    prefs: &NotificationPrefs,
+    user: &garden_auth::User,
+    group: &[&TaskRecord],
+    now: Timestamp,
+) -> Result<bool, garden_store::StoreError> {
+    let head = group[0];
+    let key = TaskKey(format!("{GROUP_PREFIX}{}", head.kind));
+
+    let last = state.store.last_notified(garden.id, user.id, &key).await?;
+    let decision = decide(head.severity, last, prefs.quiet, prefs.local_hour(now), now);
+    if !decision.should_send() {
+        return Ok(false);
+    }
+
+    let kind = TaskKind::from_label(&head.kind).unwrap_or(TaskKind::Inspect);
+    let reach = reach_for(head.severity);
+    let targets: Vec<String> = group.iter().map(|t| t.target.clone()).collect();
+
+    let note = compose_group(
+        kind,
+        &garden.name,
+        &targets,
+        head.severity,
+        reach.priority,
+        Some(tap_target(&state.config.base_url, garden.id, kind)),
+    );
+
+    let delivered = notifier
+        .deliver(
+            &note,
+            reach,
+            prefs.ntfy_topic.as_deref(),
+            prefs.email_enabled.then(|| user.email.as_str()),
+        )
+        .await;
+
+    if !delivered.any() {
+        tracing::warn!(
+            kind = %head.kind,
+            user = %user.id,
+            why = delivered.why(),
+            "no channel accepted the grouped notification"
+        );
+        return Ok(false);
+    }
+
+    let channels = match (delivered.push, delivered.email) {
+        (true, true) => "push,email",
+        (true, false) => "push",
+        _ => "email",
+    };
+    state
+        .store
+        .record_notification(garden.id, user.id, &key, head.severity, channels, now)
+        .await?;
+
+    tracing::info!(kind = %head.kind, count = group.len(), %channels, "notified as a group");
+    Ok(true)
+}
+
+/// Marks a bookkeeping key as standing for a kind rather than a task.
+///
+/// Same trick the daily brief uses, and for the same reason: it reuses the existing
+/// once-per-thing table rather than needing one of its own.
+const GROUP_PREFIX: &str = "__kind:";
+
 /// Where tapping the notification body lands.
 ///
 /// The garden page, except for the two jobs that are physical work — for those, the
@@ -412,6 +517,34 @@ mod tests {
         // not silence the reminder. `Inspect` is the honest fallback: something needs
         // eyes on it. The exhaustive round-trip lives in `garden_core::task`.
         assert_eq!(TaskKind::from_label("something we renamed"), None);
+    }
+
+    #[test]
+    fn a_group_is_rate_limited_as_one_thing_not_as_each_plant() {
+        // The subtlety that makes grouping safe. Bookkeeping is keyed on the kind, so
+        // harvesting one of five plants does not leave four un-notified keys ready to
+        // fire again as a fresh push on the next sweep.
+        let a = TaskKey(format!("{GROUP_PREFIX}harvest"));
+        let b = TaskKey(format!("{GROUP_PREFIX}harvest"));
+        assert_eq!(a, b);
+        assert_ne!(a, TaskKey(format!("{GROUP_PREFIX}thin seedlings")));
+    }
+
+    #[test]
+    fn a_group_key_cannot_collide_with_a_real_task() {
+        // `TaskKey::new` builds "<kind>:<target>" from a lower-cased debug name, so
+        // nothing it produces starts with the prefix. A collision would mean a real
+        // task silently sharing a group's once-per-day budget.
+        for kind in TaskKind::ALL {
+            for target in [
+                garden_core::Target::Garden,
+                garden_core::Target::Slot(garden_core::SlotId(3)),
+            ] {
+                let key = TaskKey::new(kind, target);
+                assert!(!key.0.starts_with(GROUP_PREFIX), "{}", key.0);
+            }
+        }
+        assert!(!BRIEF_KEY.starts_with(GROUP_PREFIX), "nor the brief's own key");
     }
 
     #[test]
