@@ -251,14 +251,27 @@ before you start collecting a week of data without it.
 > # crash means no telemetry until the next reboot — which reads as a dead sensor
 > # rather than a dead process, and is how a month of history ends up mostly gaps.
 > while true; do
->   /home/pi/garden-edge run
+>   "$HOME/garden-edge" run
 >   sleep 10
 > done
 > EOF
 > chmod 700 ~/garden-edge.sh    # it holds the agent token
+> ```
 >
-> crontab -e
-> # @reboot /home/pi/garden-edge.sh >> /home/pi/garden-edge.log 2>&1
+> Then the boot entry. Written this way rather than by hand in `crontab -e`,
+> because `$HOME` is expanded **as the line is written**, so the crontab ends up
+> holding a correct absolute path whatever the account is called. A hand-typed
+> `/home/pi/...` on a device whose user is not `pi` is accepted silently: cron
+> fires at boot, fails to find the script, and cannot even report it because the
+> output redirect points into the same directory that does not exist. The first
+> symptom is a garden that has been quietly offline since its last power cut.
+>
+> `grep -v` first, so re-running this replaces the entry instead of adding a second.
+>
+> ```sh
+> (crontab -l 2>/dev/null | grep -v garden-edge.sh; echo "@reboot $HOME/garden-edge.sh >> $HOME/garden-edge.log 2>&1") | crontab -
+> crontab -l | grep garden-edge     # check the path is yours
+> systemctl is-active cron          # not active, and @reboot never runs
 > ```
 >
 > Start it now rather than waiting for a reboot, and check it stays up:
